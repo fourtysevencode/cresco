@@ -162,7 +162,7 @@ function printProbe(result, output) {
   }
 }
 
-export async function runCli(args, { output = console.log, error = console.error, signal } = {}) {
+export async function runCli(args, { output = console.log, error = console.error, signal, progress } = {}) {
   const options = parseArgs(args);
   if (options.help) { output(USAGE); return 0; }
   if (options.demo) {
@@ -188,12 +188,15 @@ export async function runCli(args, { output = console.log, error = console.error
     return 0;
   }
   const token = githubToken();
+  progress?.('Loading GitHub source');
   const report = await inspectGitHubRepository({ token, repository: options.repository });
   if (!options.liveUrl && !options.noAi) {
+    progress?.('Luna is reviewing the repository');
     report.agent = await reviewWithCodex(report, { mode: 'repository' });
     report.pullRequests = [];
     for (const finding of report.agent.findings) {
       try {
+        if (!options.dryRun) progress?.('Creating draft pull requests');
         if (!options.dryRun) report.pullRequests.push(await createFindingPullRequest({ token, repository: report.repository, finding, mode: 'repository' }));
       } catch (error) { report.pullRequests.push({ error: error.message, title: finding.title }); }
     }
@@ -211,6 +214,7 @@ export async function runCli(args, { output = console.log, error = console.error
   if (!options.liveUrl) return 0;
   const incidentIds = new Set();
   do {
+    progress?.('Checking the live API');
     const result = await probeLiveApi(options.liveUrl, report, { token });
     const securityFallback = result.statusCode === null || (result.statusCode >= 400 && result.statusCode < 500);
     if ((!result.healthy || securityFallback) && !options.noAi) {
@@ -220,10 +224,12 @@ export async function runCli(args, { output = console.log, error = console.error
         incidentIds.add(incidentKey);
         result.agentMode = mode;
         result.dryRun = options.dryRun;
+        progress?.(mode === 'live' ? 'Luna is diagnosing the failure' : 'Luna is reviewing the repository');
         result.agent = await reviewWithCodex(report, { mode, liveFailure: mode === 'live' ? result : null });
         result.pullRequests = [];
         for (const finding of result.agent.findings) {
           try {
+            if (!options.dryRun) progress?.('Creating draft pull requests');
             if (!options.dryRun) result.pullRequests.push(await createFindingPullRequest({ token, repository: report.repository, finding, mode }));
           } catch (error) { result.pullRequests.push({ error: error.message, title: finding.title }); }
         }

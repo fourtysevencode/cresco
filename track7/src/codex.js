@@ -1,10 +1,33 @@
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { existsSync, readdirSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { eligibleForPullRequest } from './eligibility.js';
 
 const projectRoot = path.resolve(fileURLToPath(new URL('..', import.meta.url)));
 const schemaPath = fileURLToPath(new URL('./analysis.schema.json', import.meta.url));
+
+export function findCodexExecutable({ env = process.env, platform = process.platform } = {}) {
+  if (env.CODEX_CLI_PATH && existsSync(env.CODEX_CLI_PATH)) return env.CODEX_CLI_PATH;
+  if (platform !== 'win32') return 'codex';
+  for (const directory of (env.Path ?? env.PATH ?? '').split(path.delimiter)) {
+    if (!directory) continue;
+    const candidate = path.join(directory, 'codex.exe');
+    if (existsSync(candidate)) return candidate;
+  }
+  if (env.LOCALAPPDATA) {
+    const root = path.join(env.LOCALAPPDATA, 'OpenAI', 'Codex', 'bin');
+    try {
+      const candidates = readdirSync(root, { withFileTypes: true })
+        .filter(entry => entry.isDirectory())
+        .map(entry => path.join(root, entry.name, 'codex.exe'))
+        .filter(existsSync)
+        .sort((left, right) => statSync(right).mtimeMs - statSync(left).mtimeMs);
+      if (candidates.length) return candidates[0];
+    } catch { /* The desktop app may not be installed at this location. */ }
+  }
+  return 'codex.exe';
+}
 
 function runProcess(args, stdin = '', timeoutMs = 180_000) {
   return new Promise((resolve, reject) => {
@@ -13,7 +36,7 @@ function runProcess(args, stdin = '', timeoutMs = 180_000) {
     delete env.CODEX_API_KEY;
     delete env.GITHUB_TOKEN;
     delete env.GH_TOKEN;
-    const child = spawn(process.platform === 'win32' ? 'codex.exe' : 'codex', args, {
+    const child = spawn(findCodexExecutable(), args, {
       cwd: projectRoot,
       env,
       stdio: ['pipe', 'pipe', 'pipe'],
@@ -25,7 +48,10 @@ function runProcess(args, stdin = '', timeoutMs = 180_000) {
     const timer = setTimeout(() => { timedOut = true; child.kill(); }, timeoutMs);
     child.stdout.on('data', chunk => { stdout = (stdout + chunk).slice(-1_000_000); });
     child.stderr.on('data', chunk => { stderr = (stderr + chunk).slice(-4_000); });
-    child.on('error', error => { clearTimeout(timer); reject(error); });
+    child.on('error', error => {
+      clearTimeout(timer);
+      reject(error.code === 'ENOENT' ? new Error('Codex CLI was not found. Install or update the Codex app, then retry Odyssey.') : error);
+    });
     child.on('close', code => {
       clearTimeout(timer);
       resolve({ code, stdout, stderr, timedOut });

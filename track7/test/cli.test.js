@@ -1,11 +1,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
-import { readFile } from 'node:fs/promises';
+import { readFile, mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
 import { parseArgs, probeLiveApi, runCli } from '../src/cli.js';
 import { analyzeRepositoryFiles, parseRepositoryUrl, validateLiveUrl } from '../src/repository.js';
 import { startDemoApi } from '../demo/target-api.js';
-import { reviewWithCodex } from '../src/codex.js';
+import { findCodexExecutable, reviewWithCodex } from '../src/codex.js';
 import { createFindingPullRequest } from '../src/github.js';
 
 test('CLI accepts repo-only and repo plus live URL, and rejects unsafe URLs', () => {
@@ -41,6 +43,19 @@ test('Luna review refuses API-key or missing CLI auth before making a model call
   const run = async () => { calls++; return { code: 0, stdout: 'Logged in using API key', stderr: '' }; };
   await assert.rejects(() => reviewWithCodex({ repository: 'team/api', sourceFiles: [] }, { run }), /not signed in with ChatGPT/);
   assert.equal(calls, 1);
+});
+
+test('desktop launcher finds the versioned Codex app executable without PATH', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'odyssey-codex-'));
+  try {
+    const binary = path.join(root, 'OpenAI', 'Codex', 'bin', 'version-id', 'codex.exe');
+    await mkdir(path.dirname(binary), { recursive: true });
+    await writeFile(binary, 'stub');
+    assert.equal(findCodexExecutable({ env: { LOCALAPPDATA: root, Path: '' }, platform: 'win32' }), binary);
+  } finally {
+    if (!path.resolve(root).startsWith(`${path.resolve(tmpdir())}${path.sep}`)) throw new Error('Refusing to remove a temp directory outside the system temp folder');
+    await rm(root, { recursive: true, force: true });
+  }
 });
 
 test('repo-only Luna output keeps critical, high, medium, and blocking logic in scanned files', async () => {

@@ -9,6 +9,12 @@
 
 ## [PROGRESS]
 
+- 2026-09-27T09:42:14Z [USER] Desktop launcher failed with `spawn codex.exe ENOENT` after repository input and blank live URL.
+- 2026-09-27T09:42:14Z [CODE] Codex runner now resolves the installed versioned Windows `codex.exe` to an absolute path, with PATH and explicit override support. Added a regression test for an empty PATH.
+- 2026-09-27T09:42:14Z [TOOL] All 18 tests pass. Installed executable logged into ChatGPT with PATH removed. A read-only Cresco scan completed with one medium logic finding; a subsequent real Odyssey launcher run completed with no eligible findings or PRs. Model finding variance was observed. Shortcut remains valid and points at updated code.
+- 2026-09-27T09:30:35Z [USER] Requested a Windows desktop launcher for Odyssey API Doctor with an Odysseus terminal portrait, repository/live URL prompts, progress bar, and final severity/PR counts.
+- 2026-09-27T09:30:35Z [CODE] Added `npm run odyssey` interactive launcher, optional CLI progress events, and README instructions. Created `C:\Users\kohli\Desktop\Odyssey API Doctor.lnk` pointing to PowerShell and the launcher.
+- 2026-09-27T09:30:35Z [TOOL] Full suite: 17 tests pass. Targeted launcher tests pass, `git diff --check` passes, shortcut exists, and an interactive PTY smoke run displayed the portrait and repository prompt. No remote PRs were created.
 - 2026-09-27T08:47:56Z [CODE] CLI now accepts matching Markdown URL links, an escaped URL scheme colon, and accidental `-- live` as `--live`. Fifteen tests pass.
 - 2026-09-27T08:47:56Z [TOOL] Corrected read-only invocation against fourtysevencode/cresco scanned 24 files; deployed `/health` returned HTTP 200. No PR was created.
 - 2026-09-27T08:38:19Z [CODE] Added category and blocksProject to Luna schema, narrowed the prompt, and enforced the same eligibility rule at the GitHub PR boundary. README and CLI help now describe the threshold.
