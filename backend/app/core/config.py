@@ -36,8 +36,12 @@ class Settings(BaseSettings):
     min_topup_paise: int = 100  # ₹1
     max_topup_paise: int = 500_000  # ₹5,000
 
-    # AI tutor: "anthropic" or "fake" (deterministic, no network — for tests/dev)
-    ai_provider: str = "anthropic"
+    # AI tutor: "gemini", "anthropic" or "fake" (canned content, no network — for tests/dev).
+    # Unset: Gemini if GEMINI_API_KEY is set, else Claude if ANTHROPIC_API_KEY is set, else fake.
+    ai_provider: str = ""
+    gemini_api_key: str = ""
+    gemini_model: str = "gemini-3.8-flash"
+    anthropic_api_key: str = ""
     claude_model: str = "claude-opus-5"
     claude_effort: str = "medium"
     max_lesson_images: int = 5

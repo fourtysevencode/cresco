@@ -3,8 +3,8 @@
     uv run python dev_server.py            # from backend/
 
 Data lives in backend/data/ (git-ignored). Demo logins and reader secrets are written to
-backend/data/demo-credentials.json on first run. Without ANTHROPIC_API_KEY the tutor uses a
-deterministic fake. Read-aloud uses free Edge voices (no key needed).
+backend/data/demo-credentials.json on first run. The AI tutor uses Gemini if GEMINI_API_KEY is
+set (env or backend/.env), else a canned fake. Read-aloud uses free Edge voices (no key needed).
 """
 
 import os
@@ -28,7 +28,6 @@ def main() -> None:
     env = os.environ
     env.setdefault("DATABASE_URL", f"postgresql+asyncpg://postgres@/postgres?host={socket_dir}")
     env.setdefault("STORAGE_DIR", str(DATA / "storage"))
-    env.setdefault("AI_PROVIDER", "anthropic" if env.get("ANTHROPIC_API_KEY") else "fake")
     env.setdefault("TTS_PROVIDER", "edge")
 
     subprocess.run([sys.executable, "-m", "alembic", "upgrade", "head"], cwd=HERE, check=True)
@@ -39,7 +38,9 @@ def main() -> None:
         seeded = subprocess.run([sys.executable, "-m", "app.cli", "seed-demo"], cwd=HERE, check=True, capture_output=True, text=True)
         creds.write_text(seeded.stdout)
     print(f"\nCresco API: http://localhost:{PORT}/docs")
-    print(f"AI tutor: {env['AI_PROVIDER']} | speech: {env['TTS_PROVIDER']} | demo logins: {creds}\n", flush=True)
+    from app.services.ai_tutor import get_tutor
+
+    print(f"AI tutor: {type(get_tutor()).__name__} | speech: {env['TTS_PROVIDER']} | demo logins: {creds}\n", flush=True)
 
     uvicorn.run("app.main:app", host="0.0.0.0", port=PORT, reload=False)
 
