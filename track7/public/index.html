@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>API Doctor · Odyssey</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/style.css">
+  <script src="/app.js" defer></script>
+</head>
+<body>
+  <div class="shell">
+    <header class="topbar">
+      <a class="brand" href="#top" aria-label="API Doctor home"><span class="brand-mark">A<span class="brand-dot">.</span></span><span>API Doctor <small>ODYSSEY / MISSION 07</small></span></a>
+      <nav aria-label="Main navigation"><a href="#overview">Overview</a><a href="#sources">Sources</a><a href="#feed">Incidents</a></nav>
+      <span class="live"><span class="pulse"></span> Monitor live</span>
+    </header>
+
+    <main id="top">
+      <section class="hero" id="overview">
+        <div class="hero-copy">
+          <div class="eyebrow">MISSION CAMPUS 2040 <span class="eyebrow-line"></span> MISSION 07</div>
+          <h1>The fix arrives<br>before the <em>next pitch.</em></h1>
+          <p>API Doctor watches demo endpoints, reads the failure, finds its root cause, and prepares a reviewable fix pull request while the team is still on stage.</p>
+          <div class="actions">
+            <button id="check" class="primary">Run live API check <span aria-hidden="true">↗</span></button>
+            <button id="python" class="secondary">Inject Python traceback</button>
+          </div>
+          <div id="message" class="message" aria-live="polite"></div>
+        </div>
+        <aside class="hero-card" aria-label="Latest incident summary">
+          <div class="hero-card-header"><span>THE LIVE LEDGER</span><span id="hero-status" class="status-pill">Awaiting signal</span></div>
+          <div class="hero-card-main">
+            <div class="hero-card-label">LATEST INCIDENT</div>
+            <div id="hero-code" class="hero-code">—</div>
+            <div id="hero-title" class="hero-title">The room is quiet.</div>
+            <p id="hero-detail">Run a check to watch API Doctor detect and explain the bundled demo failure.</p>
+          </div>
+          <div class="ledger-flow" aria-label="Response stages">
+            <div><span>01</span><strong>Detect</strong><small>HTTP &amp; logs</small></div>
+            <div><span>02</span><strong>Diagnose</strong><small>Stack trace</small></div>
+            <div><span>03</span><strong>Repair</strong><small>Draft PR</small></div>
+          </div>
+          <div class="hero-card-foot"><span>ODYSSEY / RESPONSE SYSTEM</span><span id="hero-time">LIVE MONITORING</span></div>
+        </aside>
+      </section>
+
+      <section class="stats" aria-label="Monitor statistics">
+        <div><span id="target-count">—</span><small>CONNECTED SOURCES</small></div>
+        <div><span id="incident-count">—</span><small>INCIDENTS FOUND</small></div>
+        <div><span id="patch-count">—</span><small>FIXES PREPARED</small></div>
+        <div><span id="pr-count">—</span><small>DRAFT PRS OPENED</small></div>
+      </section>
+
+      <div class="section-intro"><span class="eyebrow">THE SYSTEM AT WORK</span><h2>Every failure leaves a trace.</h2><p>One view for the APIs being watched and the fixes being prepared.</p></div>
+      <div class="columns">
+        <section class="panel" id="sources">
+          <div class="panel-heading"><div><span class="section-number">01 /</span><h3>Watched APIs</h3></div><span class="tag">OPT-IN SOURCES</span></div>
+          <div id="targets" class="targets"></div>
+        </section>
+        <section class="panel incidents-panel" id="feed">
+          <div class="panel-heading"><div><span class="section-number">02 /</span><h3>Incident feed</h3></div><span class="tag">LATEST FIRST</span></div>
+          <div id="incidents" class="incidents"></div>
+        </section>
+      </div>
+      <footer><span>API Doctor <i>·</i> Odyssey</span><span>LOG → DIAGNOSIS → PATCH → DRAFT PR</span><span>Review before merge</span></footer>
+    </main>
+  </div>
+</body>
+</html>

@@ -1,0 +1,10 @@
+[
+  {
+    "id": "team-example",
+    "name": "Example Campus API",
+    "stack": "Node or Python",
+    "url": "https://example.com/health",
+    "repository": "team-owner/repository",
+    "filePath": "src/server.js"
+  }
+]

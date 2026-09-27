@@ -1,0 +1,6 @@
+.env
+node_modules/
+*.log
+__pycache__/
+targets.json
+output/
