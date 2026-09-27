@@ -2,9 +2,10 @@ from collections.abc import AsyncIterator
 from datetime import datetime
 import uuid
 
-from sqlalchemy import DateTime, MetaData, func
+from sqlalchemy import URL, DateTime, MetaData, func, make_url
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
+from sqlalchemy.pool import NullPool
 
 from app.core.config import get_settings
 
@@ -33,10 +34,32 @@ _engine: AsyncEngine | None = None
 _sessionmaker: async_sessionmaker[AsyncSession] | None = None
 
 
+def database_url(raw: str | None = None) -> URL:
+    """Accepts the URLs hosted Postgres providers hand out (e.g. Neon's
+    `postgres://…?sslmode=require&channel_binding=require`) and converts them for asyncpg."""
+    url = make_url(raw or get_settings().database_url)
+    if url.drivername in ("postgres", "postgresql"):
+        url = url.set(drivername="postgresql+asyncpg")
+    query = dict(url.query)
+    sslmode = query.pop("sslmode", None)
+    query.pop("channel_binding", None)
+    if sslmode and sslmode not in ("disable", "allow", "prefer") and "ssl" not in query:
+        query["ssl"] = "require"
+    if get_settings().vercel:
+        # Serverless: connections may sit behind a transaction-mode pooler, so don't cache
+        # prepared statements.
+        query["prepared_statement_cache_size"] = "0"
+    return url.set(query=query)
+
+
 def get_engine() -> AsyncEngine:
     global _engine, _sessionmaker
     if _engine is None:
-        _engine = create_async_engine(get_settings().database_url, pool_pre_ping=True)
+        if get_settings().vercel:
+            # Function instances freeze between requests; don't keep idle connections around.
+            _engine = create_async_engine(database_url(), poolclass=NullPool, connect_args={"statement_cache_size": 0})
+        else:
+            _engine = create_async_engine(database_url(), pool_pre_ping=True)
         _sessionmaker = async_sessionmaker(_engine, expire_on_commit=False)
     return _engine
 

@@ -7,8 +7,7 @@ from sqlalchemy.ext.asyncio import async_engine_from_config
 
 from alembic import context
 
-from app.core.config import get_settings
-from app.core.db import Base
+from app.core.db import Base, database_url
 import app.models  # noqa: F401  (registers all tables on Base.metadata)
 
 # this is the Alembic Config object, which provides
@@ -22,7 +21,7 @@ if config.config_file_name is not None:
 
 target_metadata = Base.metadata
 # The database URL comes from app settings (DATABASE_URL / .env), not alembic.ini.
-config.set_main_option("sqlalchemy.url", get_settings().database_url.replace("%", "%%"))
+config.set_main_option("sqlalchemy.url", database_url().render_as_string(hide_password=False).replace("%", "%%"))
 
 # other values from the config, defined by the needs of env.py,
 # can be acquired:

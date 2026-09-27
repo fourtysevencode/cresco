@@ -1,0 +1,12 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "functions": {
+    "app/main.py": {
+      "maxDuration": 300,
+      "excludeFiles": "{tests/**,alembic/**,data/**,dev_server.py}"
+    }
+  },
+  "crons": [
+    { "path": "/v1/cron/daily", "schedule": "30 0 * * *" }
+  ]
+}

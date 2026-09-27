@@ -1,6 +1,7 @@
 from functools import lru_cache
 from zoneinfo import ZoneInfo
 
+from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -8,6 +9,13 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
     env: str = "dev"
+    # Set automatically by Vercel (VERCEL=1). Switches to serverless-friendly behaviour: no in-process
+    # scheduler (use the /v1/cron/daily endpoint), no DB connection pool, and /tmp for files.
+    vercel: bool = False
+    # Vercel Cron sends "Authorization: Bearer <CRON_SECRET>" to /v1/cron/daily.
+    cron_secret: str = ""
+    # Web app origins allowed to call the API from a browser, e.g. ["https://cresco.vercel.app"].
+    cors_origins: list[str] = ["*"]
     database_url: str = "postgresql+asyncpg://cresco:cresco@localhost:5432/cresco"
 
     # Auth
@@ -52,6 +60,14 @@ class Settings(BaseSettings):
 
     timezone: str = "Asia/Kolkata"
     scheduler_enabled: bool = True
+
+    @model_validator(mode="after")
+    def _serverless_defaults(self):
+        if self.vercel:
+            self.scheduler_enabled = False
+            if self.storage_dir == "./data":
+                self.storage_dir = "/tmp/cresco-data"  # the only writable path; not persistent
+        return self
 
     @property
     def tz(self) -> ZoneInfo:

@@ -15,15 +15,21 @@ from app.services import leaderboard
 log = logging.getLogger("cresco.jobs")
 
 
-async def close_current_week() -> None:
-    """Sunday 23:59: issue prizes for the week that is ending."""
-    week = iso_week()
+async def close_week(week: str) -> int:
+    """Issue prizes for `week` in every school. Idempotent. Returns the number issued."""
     async with get_sessionmaker()() as session:
         issued = await leaderboard.close_week(session, week)
     log.info("closed %s: %d rewards issued", week, len(issued))
+    return len(issued)
+
+
+async def close_current_week() -> None:
+    """Sunday 23:59: issue prizes for the week that is ending."""
+    await close_week(iso_week())
 
 
 async def prune_nonces() -> None:
+    """Drop terminal nonces too old to be replayed (the timestamp check rejects them anyway)."""
     cutoff = now() - timedelta(seconds=get_settings().terminal_clock_skew_seconds * 2)
     async with get_sessionmaker()() as session:
         await session.execute(delete(TerminalNonce).where(TerminalNonce.created_at < cutoff))
