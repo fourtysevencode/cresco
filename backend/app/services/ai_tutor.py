@@ -14,6 +14,7 @@ import base64
 from dataclasses import dataclass
 from functools import lru_cache
 import json
+import logging
 from typing import Protocol
 
 import anthropic
@@ -26,6 +27,8 @@ from pydantic import BaseModel, ValidationError
 from app.core.config import get_settings
 from app.prompts import tutor as prompts
 from app.services.languages import language_name
+
+log = logging.getLogger("cresco.ai")
 
 # Opt in to server-side refusal fallbacks: if the model's safety classifiers decline a request,
 # the API retries it on Anthropic's recommended fallback model inside the same call.
@@ -209,15 +212,16 @@ def _b64(data: bytes) -> str:
     return base64.standard_b64encode(data).decode()
 
 
-_GEMINI_RETRY_DELAYS = (1.5, 4.0)  # seconds between attempts on 5xx / network errors
+_GEMINI_RETRY_DELAYS = (2.0,)  # seconds before retrying a 5xx / network error on the same model
 
 
 class GeminiTutor:
     """Google Gemini via the google-genai SDK. Uses the same prompts and output schemas as Claude."""
 
-    def __init__(self, client: genai.Client, model: str):
+    def __init__(self, client: genai.Client, model: str, fallback_models: tuple[str, ...] = ()):
         self.client = client
         self.model = model
+        self.fallback_models = fallback_models
 
     async def _generate(self, contents, system: str, schema: type[BaseModel] | None = None):
         config = genai_types.GenerateContentConfig(
@@ -226,18 +230,7 @@ class GeminiTutor:
             response_schema=schema,
             automatic_function_calling=genai_types.AutomaticFunctionCallingConfig(disable=True),  # no tools used
         )
-        # Gemini (especially the free tier) often answers 5xx "model overloaded" for a few seconds;
-        # retry those with a short backoff before giving up.
-        for attempt, delay in enumerate(_GEMINI_RETRY_DELAYS + (None,)):
-            try:
-                response = await self.client.aio.models.generate_content(model=self.model, contents=contents, config=config)
-                break
-            except genai_errors.ClientError as e:
-                raise TutorError("ai_busy" if e.code == 429 else "ai_bad_request")
-            except (genai_errors.APIError, httpx.HTTPError):
-                if delay is None:
-                    raise TutorError("ai_busy")
-                await asyncio.sleep(delay)
+        response = await self._call_with_fallback(contents, config)
         feedback = response.prompt_feedback
         if feedback is not None and feedback.block_reason:
             raise TutorError("ai_refused")
@@ -255,6 +248,26 @@ class GeminiTutor:
             return schema.model_validate_json(response.text or "")
         except ValidationError:
             raise TutorError("ai_bad_output")
+
+    async def _call_with_fallback(self, contents, config):
+        """Gemini (especially the free tier) often answers 5xx "overloaded" or 429 "quota" for a while.
+        Retry 5xx briefly, then fall back to the next model: free-tier quotas are per model."""
+        models = [self.model] + [m for m in self.fallback_models if m != self.model]
+        for model in models:
+            for delay in _GEMINI_RETRY_DELAYS + (None,):
+                try:
+                    return await self.client.aio.models.generate_content(model=model, contents=contents, config=config)
+                except genai_errors.ClientError as e:
+                    log.warning("gemini %s: HTTP %s %s", model, e.code, e.message)
+                    if e.code != 429:
+                        raise TutorError("ai_bad_request")
+                    break  # quota for this model: try the next one
+                except (genai_errors.APIError, httpx.HTTPError) as e:
+                    log.warning("gemini %s: %s", model, e)
+                    if delay is None:
+                        break
+                    await asyncio.sleep(delay)
+        raise TutorError("ai_busy")
 
     async def explain(self, images, language, grade, subject):
         contents = [genai_types.Part.from_bytes(data=img.data, mime_type=img.media_type) for img in images]
@@ -341,7 +354,8 @@ def get_tutor() -> Tutor:
     s = get_settings()
     provider = s.ai_provider or ("gemini" if s.gemini_api_key else "anthropic" if s.anthropic_api_key else "fake")
     if provider == "gemini":
-        return GeminiTutor(genai.Client(api_key=s.gemini_api_key), s.gemini_model)
+        fallbacks = tuple(m.strip() for m in s.gemini_fallback_models.split(",") if m.strip())
+        return GeminiTutor(genai.Client(api_key=s.gemini_api_key), s.gemini_model, fallbacks)
     if provider == "anthropic":
         return ClaudeTutor(anthropic.AsyncAnthropic(api_key=s.anthropic_api_key or None), s.claude_model, s.claude_effort)
     return FakeTutor()

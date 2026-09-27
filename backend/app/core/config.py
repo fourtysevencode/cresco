@@ -41,6 +41,8 @@ class Settings(BaseSettings):
     ai_provider: str = ""
     gemini_api_key: str = ""
     gemini_model: str = "gemini-3.8-flash"
+    # Tried in order when the main model is overloaded or out of free-tier quota (comma-separated).
+    gemini_fallback_models: str = "gemini-3.5-flash"
     anthropic_api_key: str = ""
     claude_model: str = "claude-opus-5"
     claude_effort: str = "medium"
