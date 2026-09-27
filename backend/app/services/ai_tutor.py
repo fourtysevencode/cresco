@@ -269,6 +269,19 @@ class GeminiTutor:
                     await asyncio.sleep(delay)
         raise TutorError("ai_busy")
 
+    async def check(self) -> list[dict]:
+        """One tiny request per configured model, reporting what Gemini says (for the admin check)."""
+        results = []
+        for model in [self.model] + [m for m in self.fallback_models if m != self.model]:
+            try:
+                r = await self.client.aio.models.generate_content(model=model, contents="Reply with the word OK.")
+                results.append({"model": model, "ok": True, "reply": (r.text or "").strip()[:50]})
+            except genai_errors.APIError as e:
+                results.append({"model": model, "ok": False, "code": e.code, "status": e.status, "message": (e.message or "")[:300]})
+            except httpx.HTTPError as e:
+                results.append({"model": model, "ok": False, "message": f"network: {e}"[:300]})
+        return results
+
     async def explain(self, images, language, grade, subject):
         contents = [genai_types.Part.from_bytes(data=img.data, mime_type=img.media_type) for img in images]
         contents.append(

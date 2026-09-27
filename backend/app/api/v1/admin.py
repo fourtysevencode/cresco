@@ -31,6 +31,7 @@ from app.schemas.admin import (
 )
 from app.schemas.auth import UserOut
 from app.services import accounts, leaderboard
+from app.services.ai_tutor import GeminiTutor, get_tutor
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
@@ -292,3 +293,14 @@ async def close_week(admin: AdminUser, session: SessionDep, week: str | None = Q
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "invalid_week")
     issued = await leaderboard.close_week(session, target, admin.school_id)
     return CloseWeekOut(week=target, rewards_issued=len(issued))
+
+
+@router.get("/ai-check")
+async def ai_check(admin: AdminUser):
+    """Which AI tutor is active, and whether each Gemini model answers right now (makes one tiny
+    request per model). Shows Gemini's error code and message if it doesn't; never the API key."""
+    tutor = get_tutor()
+    result: dict = {"provider": type(tutor).__name__}
+    if isinstance(tutor, GeminiTutor):
+        result["models"] = await tutor.check()
+    return result
