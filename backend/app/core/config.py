@@ -41,8 +41,9 @@ class Settings(BaseSettings):
     ai_provider: str = ""
     gemini_api_key: str = ""
     gemini_model: str = "gemini-3.8-flash"
-    # Tried in order when the main model is overloaded or out of free-tier quota (comma-separated).
-    gemini_fallback_models: str = "gemini-3.5-flash"
+    # Tried in order when the main model is overloaded or out of quota (comma-separated). The free tier
+    # allows only 20 requests/day per model, so chaining the free Flash models multiplies that.
+    gemini_fallback_models: str = "gemini-3.7-flash,gemini-3.6-flash,gemini-3.5-flash"
     anthropic_api_key: str = ""
     claude_model: str = "claude-opus-5"
     claude_effort: str = "medium"
