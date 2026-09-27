@@ -277,7 +277,14 @@ class GeminiTutor:
                 r = await self.client.aio.models.generate_content(model=model, contents="Reply with the word OK.")
                 results.append({"model": model, "ok": True, "reply": (r.text or "").strip()[:50]})
             except genai_errors.APIError as e:
-                results.append({"model": model, "ok": False, "code": e.code, "status": e.status, "message": (e.message or "")[:300]})
+                violations = [
+                    v
+                    for d in (e.details or {}).get("error", {}).get("details", [])
+                    for v in d.get("violations", [])
+                ]
+                results.append(
+                    {"model": model, "ok": False, "code": e.code, "status": e.status, "message": (e.message or "")[:200], "quota": violations}
+                )
             except httpx.HTTPError as e:
                 results.append({"model": model, "ok": False, "message": f"network: {e}"[:300]})
         return results
