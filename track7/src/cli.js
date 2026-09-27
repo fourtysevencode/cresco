@@ -13,7 +13,7 @@ const USAGE = `API Doctor · Odyssey
 
 Usage:
   npm run doctor -- demo
-  npm run doctor -- inspect <github-repo-url> [--live <api-url>] [--watch] [--interval <seconds>] [--dry-run] [--json]
+  npm run doctor -- inspect <github-repo-url> [--live <api-url>] [--watch] [--interval <seconds>] [--dry-run] [--verbose] [--json]
 
 Examples:
   npm run doctor -- demo
@@ -23,18 +23,18 @@ Examples:
 Repo-only mode asks Codex Luna for critical, high, medium, or project-blocking logical issues and opens draft fix PRs for validated findings.
 Add --live to investigate an observed API failure and open a draft fix PR when evidence supports a repair.
 Use GITHUB_TOKEN, GH_TOKEN, or your existing Git credential for PR creation. Sign the Codex CLI in with ChatGPT using codex login.
---dry-run analyzes without opening PRs. --no-ai runs only the basic source and HTTP checks.
+--dry-run analyzes without opening PRs. --verbose prints timestamped progress to stderr. --no-ai runs only the basic source and HTTP checks.
 Use --allow-local only to probe a local demo API. Press Ctrl+C to stop --watch.`;
 
 export function parseArgs(args) {
   if (!args.length || args.includes('--help') || args.includes('-h')) return { help: true };
   if (args[0] === 'demo') {
-    if (args.length > 2 || (args[1] && args[1] !== '--json')) throw new Error(`Unknown demo option\n\n${USAGE}`);
-    return { demo: true, json: args.includes('--json') };
+    if (args.slice(1).some(flag => !['--json', '--verbose'].includes(flag))) throw new Error(`Unknown demo option\n\n${USAGE}`);
+    return { demo: true, json: args.includes('--json'), verbose: args.includes('--verbose') };
   }
   const values = args[0] === 'inspect' ? args.slice(1) : args;
   if (!values[0] || values[0].startsWith('--')) throw new Error(USAGE);
-  const options = { repository: parseRepositoryUrl(values[0]), liveUrl: null, watch: false, dryRun: false, noAi: false, json: false, allowLocal: false, interval: 15 };
+  const options = { repository: parseRepositoryUrl(values[0]), liveUrl: null, watch: false, dryRun: false, noAi: false, verbose: false, json: false, allowLocal: false, interval: 15 };
   for (let index = 1; index < values.length; index++) {
     let flag = values[index];
     if (flag === '--' && values[index + 1] === 'live') { flag = '--live'; index++; }
@@ -46,6 +46,7 @@ export function parseArgs(args) {
     else if (flag === '--watch') options.watch = true;
     else if (flag === '--pr' || flag === '--codex') { /* Kept for earlier CLI invocations. */ }
     else if (flag === '--dry-run') options.dryRun = true;
+    else if (flag === '--verbose') options.verbose = true;
     else if (flag === '--no-ai') options.noAi = true;
     else if (flag === '--json') options.json = true;
     else if (flag === '--allow-local') options.allowLocal = true;
@@ -162,10 +163,16 @@ function printProbe(result, output) {
   }
 }
 
-export async function runCli(args, { output = console.log, error = console.error, signal, progress } = {}) {
+export async function runCli(args, { output = console.log, error = console.error, log, signal, progress } = {}) {
   const options = parseArgs(args);
   if (options.help) { output(USAGE); return 0; }
+  const trace = message => {
+    if (!options.verbose) return;
+    const safe = String(message).replace(/[\x00-\x1f\x7f]/g, ' ').slice(0, 350);
+    (log ?? error)(`[${new Date().toLocaleTimeString('en-GB', { hour12: false })}] ${safe}`);
+  };
   if (options.demo) {
+    trace('Starting bundled demo API and probing its known failing route');
     const files = await Promise.all(['target-api.js', 'python-api.py'].map(async name => ({
       path: `demo/${name}`,
       content: await readFile(new URL(`../demo/${name}`, import.meta.url), 'utf8')
@@ -175,6 +182,7 @@ export async function runCli(args, { output = console.log, error = console.error
     try {
       const url = `http://127.0.0.1:${demoServer.address().port}/api/students/42/progress`;
       const result = await probeLiveApi(url, report, { localSources: new Map(files.map(file => [file.path, file.content])) });
+      trace(`Demo probe returned HTTP ${result.statusCode}`);
       if (options.json) {
         output(JSON.stringify({ type: 'repository', report }));
         output(JSON.stringify({ type: 'probe', result }));
@@ -187,18 +195,22 @@ export async function runCli(args, { output = console.log, error = console.error
     }
     return 0;
   }
+  trace('Checking GitHub authorization');
   const token = githubToken();
+  trace(token ? 'GitHub credential is available for draft PRs' : 'No GitHub credential found; public scanning is available, but PR creation may fail');
+  trace(`Starting ${options.liveUrl ? 'live API check' : 'repository scan'} for ${options.repository}${options.dryRun ? ' (dry run)' : ''}`);
   progress?.('Loading GitHub source');
-  const report = await inspectGitHubRepository({ token, repository: options.repository });
+  const report = await inspectGitHubRepository({ token, repository: options.repository, onLog: trace });
   if (!options.liveUrl && !options.noAi) {
     progress?.('Luna is reviewing the repository');
-    report.agent = await reviewWithCodex(report, { mode: 'repository' });
+    report.agent = await reviewWithCodex(report, { mode: 'repository', onLog: trace });
     report.pullRequests = [];
     for (const finding of report.agent.findings) {
       try {
         if (!options.dryRun) progress?.('Creating draft pull requests');
-        if (!options.dryRun) report.pullRequests.push(await createFindingPullRequest({ token, repository: report.repository, finding, mode: 'repository' }));
-      } catch (error) { report.pullRequests.push({ error: error.message, title: finding.title }); }
+        if (!options.dryRun) report.pullRequests.push(await createFindingPullRequest({ token, repository: report.repository, finding, mode: 'repository', onLog: trace }));
+        else trace(`Dry run: skipped PR for ${finding.title}`);
+      } catch (error) { trace(`PR failed for ${finding.title}: ${error.message}`); report.pullRequests.push({ error: error.message, title: finding.title }); }
     }
   }
   if (options.json) output(JSON.stringify({ type: 'repository', report }));
@@ -211,12 +223,16 @@ export async function runCli(args, { output = console.log, error = console.error
       if (options.dryRun) output('DRY RUN     No pull requests created.');
     }
   }
-  if (!options.liveUrl) return 0;
+  if (!options.liveUrl) { trace('Repository scan complete'); return 0; }
   const incidentIds = new Set();
   do {
     progress?.('Checking the live API');
+    trace(`Live API: sending GET ${options.liveUrl}`);
     const result = await probeLiveApi(options.liveUrl, report, { token });
+    trace(`Live API: ${result.statusCode === null ? `request failed (${result.error})` : `HTTP ${result.statusCode}`}`);
     const securityFallback = result.statusCode === null || (result.statusCode >= 400 && result.statusCode < 500);
+    if (securityFallback) trace('Live API unavailable or returned a client error; switching to repository review');
+    else if (result.healthy) trace('Live API is healthy; no Luna review or PR is needed');
     if ((!result.healthy || securityFallback) && !options.noAi) {
       const mode = securityFallback ? 'repository' : 'live';
       const incidentKey = `${mode}:${result.statusCode}:${result.error ?? ''}:${result.diagnosis?.evidence ?? ''}`;
@@ -225,13 +241,14 @@ export async function runCli(args, { output = console.log, error = console.error
         result.agentMode = mode;
         result.dryRun = options.dryRun;
         progress?.(mode === 'live' ? 'Luna is diagnosing the failure' : 'Luna is reviewing the repository');
-        result.agent = await reviewWithCodex(report, { mode, liveFailure: mode === 'live' ? result : null });
+        result.agent = await reviewWithCodex(report, { mode, liveFailure: mode === 'live' ? result : null, onLog: trace });
         result.pullRequests = [];
         for (const finding of result.agent.findings) {
           try {
             if (!options.dryRun) progress?.('Creating draft pull requests');
-            if (!options.dryRun) result.pullRequests.push(await createFindingPullRequest({ token, repository: report.repository, finding, mode }));
-          } catch (error) { result.pullRequests.push({ error: error.message, title: finding.title }); }
+            if (!options.dryRun) result.pullRequests.push(await createFindingPullRequest({ token, repository: report.repository, finding, mode, onLog: trace }));
+            else trace(`Dry run: skipped PR for ${finding.title}`);
+          } catch (error) { trace(`PR failed for ${finding.title}: ${error.message}`); result.pullRequests.push({ error: error.message, title: finding.title }); }
         }
         result.pr = result.pullRequests.find(pr => pr.url);
         result.prError = result.pullRequests.find(pr => pr.error)?.error;
@@ -245,6 +262,7 @@ export async function runCli(args, { output = console.log, error = console.error
       signal?.addEventListener('abort', () => { clearTimeout(timer); resolve(); }, { once: true });
     });
   } while (!signal?.aborted);
+  trace('Live API check complete');
   return 0;
 }
 

@@ -15,6 +15,7 @@ test('CLI accepts repo-only and repo plus live URL, and rejects unsafe URLs', ()
   assert.equal(parseArgs(['inspect', 'https://github.com/team/campus-api']).liveUrl, null);
   assert.equal(parseArgs(['inspect', 'https://github.com/team/campus-api']).noAi, false);
   assert.equal(parseArgs(['inspect', 'https://github.com/team/campus-api', '--dry-run']).dryRun, true);
+  assert.equal(parseArgs(['inspect', 'https://github.com/team/campus-api', '--verbose']).verbose, true);
   assert.equal(parseArgs(['inspect', 'https://github.com/team/campus-api', '--live', 'https://api.example.com/health']).liveUrl, 'https://api.example.com/health');
   const pasted = parseArgs(['inspect', '[https://github.com/team/campus-api](https://github.com/team/campus-api)', '--', 'live', 'https\\://api.example.com/health']);
   assert.equal(pasted.repository, 'team/campus-api');
@@ -60,6 +61,7 @@ test('desktop launcher finds the versioned Codex app executable without PATH', a
 
 test('repo-only Luna output keeps critical, high, medium, and blocking logic in scanned files', async () => {
   const calls = [];
+  const logs = [];
   const findings = [
     { title: 'Critical injection', filePath: 'app.js', severity: 'critical', original: 'eval(x)', replacement: 'String(x)' },
     { title: 'High issue', filePath: 'app.js', severity: 'high', original: 'eval(x)', replacement: 'String(x)' },
@@ -74,11 +76,13 @@ test('repo-only Luna output keeps critical, high, medium, and blocking logic in 
       ? { code: 0, stdout: 'Logged in using ChatGPT', stderr: '' }
       : { code: 0, stdout: JSON.stringify({ summary: 'Four findings', findings }), stderr: '' };
   };
-  const analysis = await reviewWithCodex({ repository: 'team/api', filePaths: ['app.js'], sourceFiles: [{ path: 'app.js', content: 'eval(x)' }] }, { run });
+  const analysis = await reviewWithCodex({ repository: 'team/api', filePaths: ['app.js'], sourceFiles: [{ path: 'app.js', content: 'eval(x)' }] }, { run, onLog: line => logs.push(line) });
   assert.deepEqual(analysis.findings.map(finding => finding.title), ['Critical injection', 'High issue', 'Medium issue', 'Startup failure']);
   assert.match(calls[1].input, /critical, high, or medium/);
   assert.match(calls[1].input, /blocksProject true only/);
   assert.ok(calls[1].args.includes('gpt-6-luna'));
+  assert.ok(logs.some(line => /starting GPT-6 Luna Fast/.test(line)));
+  assert.ok(logs.some(line => /passed eligibility/.test(line)));
 });
 
 test('repo-only and repo plus live URL work without a pasted stack trace', async () => {
@@ -87,6 +91,7 @@ test('repo-only and repo plus live URL work without a pasted stack trace', async
   const demoServer = await startDemoApi(0);
   const demoUrl = `http://127.0.0.1:${demoServer.address().port}/api/students/42/progress`;
   const output = [];
+  const logs = [];
   globalThis.fetch = async (url, options) => {
     if (!String(url).startsWith('https://api.github.com/')) return originalFetch(url, options);
     const pathname = new URL(url).pathname;
@@ -97,9 +102,11 @@ test('repo-only and repo plus live URL work without a pasted stack trace', async
     return new Response(JSON.stringify(body), { status: 200, headers: { 'Content-Type': 'application/json' } });
   };
   try {
-    await runCli(['inspect', 'https://github.com/team/campus-api', '--no-ai', '--json'], { output: line => output.push(JSON.parse(line)) });
+    await runCli(['inspect', 'https://github.com/team/campus-api', '--no-ai', '--verbose', '--json'], { output: line => output.push(JSON.parse(line)), log: line => logs.push(line) });
     assert.equal(output.length, 1);
     assert.equal(output[0].report.findings[0].title, 'Possible missing progress crash');
+    assert.ok(logs.some(line => /Source 1\/1: demo\/target-api.js/.test(line)));
+    assert.ok(logs.some(line => /Repository scan complete/.test(line)));
 
     output.length = 0;
     await runCli(['inspect', 'https://github.com/team/campus-api', '--live', demoUrl, '--allow-local', '--no-ai', '--json'], { output: line => output.push(JSON.parse(line)) });
@@ -141,6 +148,7 @@ test('a live 500 without a traceback is reported as confirmed failure with unkno
 test('critical finding creates a real draft PR request from a fork branch', async () => {
   const originalFetch = globalThis.fetch;
   const calls = [];
+  const logs = [];
   const source = "exports.run = (req, res) => {\n  const value = req.body.value;\n  if (typeof value !== 'string') return res.sendStatus(400);\n  return res.send(eval(value));\n};\n";
   const finding = {
     title: 'Remote code execution through eval', detail: 'Untrusted query input reaches eval.',
@@ -161,7 +169,7 @@ test('critical finding creates a real draft PR request from a fork branch', asyn
     return new Response(JSON.stringify(data), { status: 200, headers: { 'Content-Type': 'application/json' } });
   };
   try {
-    const pr = await createFindingPullRequest({ token: 'fake-token', repository: 'team/api', finding });
+    const pr = await createFindingPullRequest({ token: 'fake-token', repository: 'team/api', finding, onLog: line => logs.push(line) });
     assert.equal(pr.url, 'https://github.com/team/api/pull/7');
     assert.equal(pr.fork, true);
     const fileWrite = calls.find(call => call.method === 'PUT');
@@ -170,6 +178,8 @@ test('critical finding creates a real draft PR request from a fork branch', asyn
     assert.equal(request.body.draft, true);
     assert.match(request.body.head, /^doctor:api-doctor\/repository-/);
     assert.equal(request.body.base, 'main');
+    assert.ok(logs.some(line => /validating the exact source edit and syntax/.test(line)));
+    assert.ok(logs.some(line => /draft opened/.test(line)));
   } finally { globalThis.fetch = originalFetch; }
 });
 

@@ -25,19 +25,24 @@ async function github(token, method, url, body) {
   return data;
 }
 
-export async function inspectGitHubRepository({ token, repository }) {
+export async function inspectGitHubRepository({ token, repository, onLog }) {
   if (!/^[\w.-]+\/[\w.-]+$/.test(repository)) throw new Error('Invalid repository');
   const root = `/repos/${repository}`;
+  onLog?.(`GitHub: reading ${repository} metadata`);
   const repo = await github(token, 'GET', root);
+  onLog?.(`GitHub: default branch is ${repo.default_branch}`);
   const tree = await github(token, 'GET', `${root}/git/trees/${encodeURIComponent(repo.default_branch)}?recursive=1`);
   if (!Array.isArray(tree.tree)) throw new Error('GitHub did not return a repository file tree');
   const paths = selectSourcePaths(tree.tree);
+  onLog?.(`GitHub: selected ${paths.length} source files from ${tree.tree.length} tree entries${tree.truncated ? ' (tree truncated)' : ''}`);
   const files = [];
-  for (const path of paths) {
+  for (const [index, path] of paths.entries()) {
+    onLog?.(`Source ${index + 1}/${paths.length}: ${path}`);
     try {
       const { source } = await sourceFile(token, repository, path, repo.default_branch);
       files.push({ path, content: source });
     } catch (error) {
+      onLog?.(`Source skipped: ${path} (${error.message})`);
       if (!/GitHub GET .*: (403|429)/.test(error.message)) continue;
       throw error;
     }
@@ -47,6 +52,7 @@ export async function inspectGitHubRepository({ token, repository }) {
     incomplete: Boolean(tree.truncated) || paths.length === 24 || files.length !== paths.length
   });
   Object.defineProperty(report, 'sourceFiles', { value: files });
+  onLog?.(`Source scan: loaded ${files.length} files and found ${report.routes.length} route declarations${report.incomplete ? ' (partial scan)' : ''}`);
   return report;
 }
 
@@ -138,13 +144,14 @@ async function writableRepository(token, upstream, base, upstreamRepo) {
   }
 }
 
-export async function createFindingPullRequest({ token, repository, finding, mode = 'repository' }) {
+export async function createFindingPullRequest({ token, repository, finding, mode = 'repository', onLog }) {
   if (!token) throw new Error('GITHUB_TOKEN is required to create a pull request');
   if (!/^[\w.-]+\/[\w.-]+$/.test(repository)) throw new Error('Invalid repository');
   if (!finding?.filePath || !/^[\w./-]+$/.test(finding.filePath) || finding.filePath.startsWith('/') || finding.filePath.split('/').includes('..')) throw new Error('Invalid source path');
   if (!eligibleForPullRequest(finding)) throw new Error('Finding is below the PR threshold: requires critical, high, medium, or blocking logic');
   if (/(?:exposed|leaked|hardcoded)\s+(?:secret|credential|token|password|key)/i.test(finding.title)) throw new Error('Exposed credentials require rotation and cannot be safely fixed by an automatic PR');
   const upstream = `/repos/${repository}`;
+  onLog?.(`PR: checking ${finding.filePath}:${finding.line} against current GitHub state`);
   const repo = await github(token, 'GET', upstream);
   const base = repo.default_branch;
   const fingerprint = createHash('sha256').update(JSON.stringify([repository, mode, finding.filePath, finding.original, finding.replacement])).digest('hex').slice(0, 20);
@@ -152,15 +159,22 @@ export async function createFindingPullRequest({ token, repository, finding, mod
   const openPulls = await github(token, 'GET', `${upstream}/pulls?state=open&per_page=100`);
   const sourceMarker = `**Source:** \`${finding.filePath}:${finding.line}\``;
   const existing = Array.isArray(openPulls) ? openPulls.find(pr => pr.body?.includes(marker) || (pr.title?.startsWith('[API Doctor]') && pr.body?.includes(sourceMarker))) : null;
-  if (existing) return { url: existing.html_url, number: existing.number, existing: true };
+  if (existing) {
+    onLog?.(`PR: existing fix found at ${existing.html_url}`);
+    return { url: existing.html_url, number: existing.number, existing: true };
+  }
   const target = await writableRepository(token, repository, base, repo);
+  onLog?.(target.repository === repository ? 'PR: using a branch in the target repository' : `PR: using fork ${target.repository}`);
   const targetRoot = `/repos/${target.repository}`;
   const { file, encodedPath, source } = await sourceFile(token, target.repository, finding.filePath, base);
+  onLog?.('PR: validating the exact source edit and syntax');
   const content = applyExactEdit(source, finding);
   validateSyntax(finding.filePath, content);
   const baseRef = await github(token, 'GET', `${targetRoot}/git/ref/heads/${encodeURIComponent(base)}`);
   const branch = `api-doctor/${mode}-${randomUUID().slice(0, 8)}`;
+  onLog?.(`PR: creating branch ${branch}`);
   await github(token, 'POST', `${targetRoot}/git/refs`, { ref: `refs/heads/${branch}`, sha: baseRef.object.sha });
+  onLog?.(`PR: writing validated edit to ${finding.filePath}`);
   await github(token, 'PUT', `${targetRoot}/contents/${encodedPath}`, {
     message: `fix: ${finding.title.slice(0, 65)}`,
     content: Buffer.from(content, 'utf8').toString('base64'),
@@ -175,5 +189,6 @@ export async function createFindingPullRequest({ token, repository, finding, mod
     draft: true,
     maintainer_can_modify: true
   });
+  onLog?.(`PR: draft opened at ${pull.html_url}`);
   return { url: pull.html_url, number: pull.number, fork: target.repository !== repository };
 }
