@@ -6,7 +6,8 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+    # Empty variables (e.g. copied from .env.example) fall back to the defaults below.
+    model_config = SettingsConfigDict(env_file=".env", extra="ignore", env_ignore_empty=True)
 
     env: str = "dev"
     # Set automatically by Vercel (VERCEL=1). Switches to serverless-friendly behaviour: no in-process
