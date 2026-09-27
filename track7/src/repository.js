@@ -1,9 +1,15 @@
 const SOURCE_FILE = /(?:^|\/)(?:[^/]+\.)?(?:[cm]?[jt]sx?|py)$/i;
 const SKIP_PATH = /(?:^|\/)(?:node_modules|vendor|dist|build|\.next|\.venv|venv|__pycache__|test|tests|spec|specs)(?:\/|$)/i;
 
+function normalizePastedUrl(input) {
+  const markdown = input.match(/^\[(https?:\/\/[^\]\s]+)\]\((https?:\/\/[^)\s]+)\)$/);
+  const url = markdown && markdown[1] === markdown[2] ? markdown[2] : input;
+  return url.replace(/^(https?)\\:\/\//i, '$1://');
+}
+
 export function parseRepositoryUrl(input) {
   let url;
-  try { url = new URL(input); } catch { throw new Error('Enter a GitHub repository URL'); }
+  try { url = new URL(normalizePastedUrl(input)); } catch { throw new Error('Enter a GitHub repository URL'); }
   const segments = url.pathname.replace(/\/$/, '').split('/').filter(Boolean);
   if (url.protocol !== 'https:' || url.hostname !== 'github.com' || url.username || url.password || url.search || url.hash || segments.length !== 2) {
     throw new Error('Use a GitHub URL like https://github.com/owner/repository');
@@ -17,7 +23,7 @@ export function parseRepositoryUrl(input) {
 export function validateLiveUrl(input, allowLocal = false) {
   if (!input) return null;
   let url;
-  try { url = new URL(input); } catch { throw new Error('Enter a full live API URL'); }
+  try { url = new URL(normalizePastedUrl(input)); } catch { throw new Error('Enter a full live API URL'); }
   if (!['https:', 'http:'].includes(url.protocol) || url.username || url.password || url.hash || url.search) throw new Error('Invalid live API URL');
   const hostname = url.hostname.toLowerCase();
   const local = hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '[::1]';

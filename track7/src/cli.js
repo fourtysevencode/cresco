@@ -6,6 +6,7 @@ import { diagnose, proposePatch } from './diagnose.js';
 import { createFixPullRequest, createFindingPullRequest, inspectGitHubRepository, previewGitHubPatch } from './github.js';
 import { analyzeRepositoryFiles, parseRepositoryUrl, validateLiveUrl } from './repository.js';
 import { reviewWithCodex } from './codex.js';
+import { githubToken } from './auth.js';
 import { startDemoApi } from '../demo/target-api.js';
 
 const USAGE = `API Doctor · Odyssey
@@ -19,9 +20,9 @@ Examples:
   npm run doctor -- inspect https://github.com/team/campus-api
   npm run doctor -- inspect https://github.com/team/campus-api --live https://demo.example.com/health --watch
 
-Repo-only mode asks Codex Luna to find critical security vulnerabilities and opens draft fix PRs.
+Repo-only mode asks Codex Luna for critical, high, medium, or project-blocking logical issues and opens draft fix PRs for validated findings.
 Add --live to investigate an observed API failure and open a draft fix PR when evidence supports a repair.
-Set GITHUB_TOKEN for repository access and PR creation. Sign the Codex CLI in with ChatGPT using codex login.
+Use GITHUB_TOKEN, GH_TOKEN, or your existing Git credential for PR creation. Sign the Codex CLI in with ChatGPT using codex login.
 --dry-run analyzes without opening PRs. --no-ai runs only the basic source and HTTP checks.
 Use --allow-local only to probe a local demo API. Press Ctrl+C to stop --watch.`;
 
@@ -35,7 +36,8 @@ export function parseArgs(args) {
   if (!values[0] || values[0].startsWith('--')) throw new Error(USAGE);
   const options = { repository: parseRepositoryUrl(values[0]), liveUrl: null, watch: false, dryRun: false, noAi: false, json: false, allowLocal: false, interval: 15 };
   for (let index = 1; index < values.length; index++) {
-    const flag = values[index];
+    let flag = values[index];
+    if (flag === '--' && values[index + 1] === 'live') { flag = '--live'; index++; }
     if (flag === '--live') {
       options.liveUrl = values[++index];
       if (!options.liveUrl || options.liveUrl.startsWith('--')) throw new Error('--live requires an API URL');
@@ -149,12 +151,14 @@ function printProbe(result, output) {
     output(result.diagnosis.rootCause);
     if (result.filePath) output(`SOURCE      ${result.filePath}:${result.diagnosis.location.line}`);
     if (result.patch) output(`PATCH       ${result.patch.before} → ${result.patch.after}`);
-    if (result.pr) output(`DRAFT PR    ${result.pr.url}`);
-    if (result.prError) output(`PR ERROR    ${result.prError}`);
   }
+  if (result.pr) output(`DRAFT PR    ${result.pr.url}`);
+  if (result.prError) output(`PR ERROR    ${result.prError}`);
   if (result.agent) {
+    if (result.agentMode === 'repository') output('FALLBACK    Live endpoint unavailable; checked repository for actionable issues.');
     output(`LUNA REVIEW ${result.agent.summary}`);
     for (const finding of result.agent.findings) output(`  • ${finding.title} · ${finding.filePath}:${finding.line}\n    ${finding.detail}`);
+    if (result.dryRun) output('DRY RUN     No pull requests created.');
   }
 }
 
@@ -183,14 +187,14 @@ export async function runCli(args, { output = console.log, error = console.error
     }
     return 0;
   }
-  const token = process.env.GITHUB_TOKEN;
+  const token = githubToken();
   const report = await inspectGitHubRepository({ token, repository: options.repository });
   if (!options.liveUrl && !options.noAi) {
-    report.agent = await reviewWithCodex(report, { mode: 'security' });
+    report.agent = await reviewWithCodex(report, { mode: 'repository' });
     report.pullRequests = [];
     for (const finding of report.agent.findings) {
       try {
-        if (!options.dryRun) report.pullRequests.push(await createFindingPullRequest({ token, repository: report.repository, finding, mode: 'security' }));
+        if (!options.dryRun) report.pullRequests.push(await createFindingPullRequest({ token, repository: report.repository, finding, mode: 'repository' }));
       } catch (error) { report.pullRequests.push({ error: error.message, title: finding.title }); }
     }
   }
@@ -208,15 +212,19 @@ export async function runCli(args, { output = console.log, error = console.error
   const incidentIds = new Set();
   do {
     const result = await probeLiveApi(options.liveUrl, report, { token });
-    if (!result.healthy && !options.noAi) {
-      const incidentKey = `${result.statusCode}:${result.error ?? ''}:${result.diagnosis?.evidence ?? ''}`;
+    const securityFallback = result.statusCode === null || (result.statusCode >= 400 && result.statusCode < 500);
+    if ((!result.healthy || securityFallback) && !options.noAi) {
+      const mode = securityFallback ? 'repository' : 'live';
+      const incidentKey = `${mode}:${result.statusCode}:${result.error ?? ''}:${result.diagnosis?.evidence ?? ''}`;
       if (!incidentIds.has(incidentKey)) {
         incidentIds.add(incidentKey);
-        result.agent = await reviewWithCodex(report, { mode: 'live', liveFailure: result });
+        result.agentMode = mode;
+        result.dryRun = options.dryRun;
+        result.agent = await reviewWithCodex(report, { mode, liveFailure: mode === 'live' ? result : null });
         result.pullRequests = [];
         for (const finding of result.agent.findings) {
           try {
-            if (!options.dryRun) result.pullRequests.push(await createFindingPullRequest({ token, repository: report.repository, finding, mode: 'live' }));
+            if (!options.dryRun) result.pullRequests.push(await createFindingPullRequest({ token, repository: report.repository, finding, mode }));
           } catch (error) { result.pullRequests.push({ error: error.message, title: finding.title }); }
         }
         result.pr = result.pullRequests.find(pr => pr.url);

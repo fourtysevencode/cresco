@@ -11,14 +11,16 @@
           "detail": { "type": "string" },
           "filePath": { "type": "string" },
           "line": { "type": "integer" },
-          "severity": { "type": "string", "enum": ["critical", "high"] },
+          "severity": { "type": "string", "enum": ["critical", "high", "medium", "low"] },
+          "category": { "type": "string", "enum": ["security", "logic", "reliability", "performance"] },
+          "blocksProject": { "type": "boolean" },
           "evidence": { "type": "string" },
           "impact": { "type": "string" },
           "original": { "type": "string" },
           "replacement": { "type": "string" },
           "testPlan": { "type": "string" }
         },
-        "required": ["title", "detail", "filePath", "line", "severity", "evidence", "impact", "original", "replacement", "testPlan"],
+        "required": ["title", "detail", "filePath", "line", "severity", "category", "blocksProject", "evidence", "impact", "original", "replacement", "testPlan"],
         "additionalProperties": false
       }
     }
