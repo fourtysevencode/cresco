@@ -9,12 +9,12 @@ Providers (AI_PROVIDER): "gemini" (Google Gemini, free tier), "anthropic" (Claud
 ANTHROPIC_API_KEY is set, else the fake tutor.
 """
 
-import asyncio
 import base64
 from dataclasses import dataclass
 from functools import lru_cache
 import json
 import logging
+import time
 from typing import Protocol
 
 import anthropic
@@ -212,7 +212,11 @@ def _b64(data: bytes) -> str:
     return base64.standard_b64encode(data).decode()
 
 
-_GEMINI_RETRY_DELAYS = (2.0,)  # seconds before retrying a 5xx / network error on the same model
+# Models that just failed are skipped for a while (per server instance), so a request doesn't wait on
+# a model that is out of quota or overloaded before reaching one that works.
+_QUOTA_COOLDOWN = 15 * 60  # seconds, after a 429 (the free tier's limit is per day)
+_OVERLOAD_COOLDOWN = 60  # seconds, after a 5xx / network error
+_cooldown_until: dict[str, float] = {}
 
 
 class GeminiTutor:
@@ -250,23 +254,22 @@ class GeminiTutor:
             raise TutorError("ai_bad_output")
 
     async def _call_with_fallback(self, contents, config):
-        """Gemini (especially the free tier) often answers 5xx "overloaded" or 429 "quota" for a while.
-        Retry 5xx briefly, then fall back to the next model: free-tier quotas are per model."""
+        """Gemini (especially the free tier) often answers 429 "quota" or 5xx "overloaded" for a while.
+        Try each model once, skipping ones that recently failed; free-tier quotas are per model."""
         models = [self.model] + [m for m in self.fallback_models if m != self.model]
-        for model in models:
-            for delay in _GEMINI_RETRY_DELAYS + (None,):
-                try:
-                    return await self.client.aio.models.generate_content(model=model, contents=contents, config=config)
-                except genai_errors.ClientError as e:
-                    log.warning("gemini %s: HTTP %s %s", model, e.code, e.message)
-                    if e.code != 429:
-                        raise TutorError("ai_bad_request")
-                    break  # quota for this model: try the next one
-                except (genai_errors.APIError, httpx.HTTPError) as e:
-                    log.warning("gemini %s: %s", model, e)
-                    if delay is None:
-                        break
-                    await asyncio.sleep(delay)
+        now = time.monotonic()
+        ready = [m for m in models if _cooldown_until.get(m, 0) <= now] or models  # all cooling down: try anyway
+        for model in ready:
+            try:
+                return await self.client.aio.models.generate_content(model=model, contents=contents, config=config)
+            except genai_errors.ClientError as e:
+                log.warning("gemini %s: HTTP %s %s", model, e.code, e.message)
+                if e.code != 429:
+                    raise TutorError("ai_bad_request")
+                _cooldown_until[model] = time.monotonic() + _QUOTA_COOLDOWN
+            except (genai_errors.APIError, httpx.HTTPError) as e:
+                log.warning("gemini %s: %s", model, e)
+                _cooldown_until[model] = time.monotonic() + _OVERLOAD_COOLDOWN
         raise TutorError("ai_busy")
 
     async def check(self) -> list[dict]:
