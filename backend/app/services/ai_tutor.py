@@ -9,6 +9,7 @@ Providers (AI_PROVIDER): "gemini" (Google Gemini, free tier), "anthropic" (Claud
 ANTHROPIC_API_KEY is set, else the fake tutor.
 """
 
+import asyncio
 import base64
 from dataclasses import dataclass
 from functools import lru_cache
@@ -208,6 +209,9 @@ def _b64(data: bytes) -> str:
     return base64.standard_b64encode(data).decode()
 
 
+_GEMINI_RETRY_DELAYS = (1.5, 4.0)  # seconds between attempts on 5xx / network errors
+
+
 class GeminiTutor:
     """Google Gemini via the google-genai SDK. Uses the same prompts and output schemas as Claude."""
 
@@ -222,12 +226,18 @@ class GeminiTutor:
             response_schema=schema,
             automatic_function_calling=genai_types.AutomaticFunctionCallingConfig(disable=True),  # no tools used
         )
-        try:
-            response = await self.client.aio.models.generate_content(model=self.model, contents=contents, config=config)
-        except genai_errors.ClientError as e:
-            raise TutorError("ai_busy" if e.code == 429 else "ai_bad_request")
-        except (genai_errors.APIError, httpx.HTTPError):
-            raise TutorError("ai_unavailable")
+        # Gemini (especially the free tier) often answers 5xx "model overloaded" for a few seconds;
+        # retry those with a short backoff before giving up.
+        for attempt, delay in enumerate(_GEMINI_RETRY_DELAYS + (None,)):
+            try:
+                response = await self.client.aio.models.generate_content(model=self.model, contents=contents, config=config)
+                break
+            except genai_errors.ClientError as e:
+                raise TutorError("ai_busy" if e.code == 429 else "ai_bad_request")
+            except (genai_errors.APIError, httpx.HTTPError):
+                if delay is None:
+                    raise TutorError("ai_busy")
+                await asyncio.sleep(delay)
         feedback = response.prompt_feedback
         if feedback is not None and feedback.block_reason:
             raise TutorError("ai_refused")
