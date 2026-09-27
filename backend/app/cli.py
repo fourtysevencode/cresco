@@ -66,6 +66,8 @@ async def seed_demo() -> None:
                     "admin": "admin@demo.cresco",
                     "parent": "parent@demo.cresco (linked to the first two students)",
                     "canteen_staff": "canteen@demo.cresco",
+                    "terminals_note": "Reader secrets are derived from TERMINAL_MASTER_KEY. If the server uses a different key "
+                    "than this machine (e.g. on Vercel), issue new ones from the dashboard: Readers -> New secret.",
                     "terminals": [
                         {"name": t.name, "terminal_id": str(t.id), "secret": terminal_secret(t.id, t.secret_version)} for t in terminals
                     ],

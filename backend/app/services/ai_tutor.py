@@ -1,22 +1,34 @@
 """The AI tutor: reads textbook photos, explains them in the student's language, answers follow-up
 questions and writes quizzes.
 
-Claude reads the photos directly (vision), so there is no separate OCR step. Explanations and quizzes
-use structured outputs, so the response is always valid, typed JSON.
+The model reads the photos directly (vision), so there is no separate OCR step. Explanations and
+quizzes use structured outputs, so the response is always valid, typed JSON.
+
+Providers (AI_PROVIDER): "gemini" (Google Gemini, free tier), "anthropic" (Claude) or "fake"
+(canned content for tests). Left unset, it picks Gemini if GEMINI_API_KEY is set, else Claude if
+ANTHROPIC_API_KEY is set, else the fake tutor.
 """
 
 import base64
 from dataclasses import dataclass
 from functools import lru_cache
 import json
+import logging
+import time
 from typing import Protocol
 
 import anthropic
-from pydantic import BaseModel
+from google import genai
+from google.genai import errors as genai_errors
+from google.genai import types as genai_types
+import httpx
+from pydantic import BaseModel, ValidationError
 
 from app.core.config import get_settings
 from app.prompts import tutor as prompts
 from app.services.languages import language_name
+
+log = logging.getLogger("cresco.ai")
 
 # Opt in to server-side refusal fallbacks: if the model's safety classifiers decline a request,
 # the API retries it on Anthropic's recommended fallback model inside the same call.
@@ -200,6 +212,132 @@ def _b64(data: bytes) -> str:
     return base64.standard_b64encode(data).decode()
 
 
+# Models that just failed are skipped for a while (per server instance), so a request doesn't wait on
+# a model that is out of quota or overloaded before reaching one that works.
+_QUOTA_COOLDOWN = 15 * 60  # seconds, after a 429 (the free tier's limit is per day)
+_OVERLOAD_COOLDOWN = 60  # seconds, after a 5xx / network error
+_cooldown_until: dict[str, float] = {}
+
+
+class GeminiTutor:
+    """Google Gemini via the google-genai SDK. Uses the same prompts and output schemas as Claude."""
+
+    def __init__(self, client: genai.Client, model: str, fallback_models: tuple[str, ...] = ()):
+        self.client = client
+        self.model = model
+        self.fallback_models = fallback_models
+
+    async def _generate(self, contents, system: str, schema: type[BaseModel] | None = None):
+        config = genai_types.GenerateContentConfig(
+            system_instruction=system,
+            response_mime_type="application/json" if schema else None,
+            response_schema=schema,
+            automatic_function_calling=genai_types.AutomaticFunctionCallingConfig(disable=True),  # no tools used
+        )
+        response = await self._call_with_fallback(contents, config)
+        feedback = response.prompt_feedback
+        if feedback is not None and feedback.block_reason:
+            raise TutorError("ai_refused")
+        candidate = response.candidates[0] if response.candidates else None
+        finish = candidate.finish_reason if candidate else None
+        if finish == genai_types.FinishReason.MAX_TOKENS:
+            raise TutorError("ai_output_truncated")
+        if finish in (genai_types.FinishReason.SAFETY, genai_types.FinishReason.PROHIBITED_CONTENT):
+            raise TutorError("ai_refused")
+        if schema is None:
+            return (response.text or "").strip()
+        if isinstance(response.parsed, schema):
+            return response.parsed
+        try:
+            return schema.model_validate_json(response.text or "")
+        except ValidationError:
+            raise TutorError("ai_bad_output")
+
+    async def _call_with_fallback(self, contents, config):
+        """Gemini (especially the free tier) often answers 429 "quota" or 5xx "overloaded" for a while.
+        Try each model once, skipping ones that recently failed; free-tier quotas are per model."""
+        models = [self.model] + [m for m in self.fallback_models if m != self.model]
+        now = time.monotonic()
+        ready = [m for m in models if _cooldown_until.get(m, 0) <= now] or models  # all cooling down: try anyway
+        for model in ready:
+            try:
+                return await self.client.aio.models.generate_content(model=model, contents=contents, config=config)
+            except genai_errors.ClientError as e:
+                log.warning("gemini %s: HTTP %s %s", model, e.code, e.message)
+                if e.code != 429:
+                    raise TutorError("ai_bad_request")
+                _cooldown_until[model] = time.monotonic() + _QUOTA_COOLDOWN
+            except (genai_errors.APIError, httpx.HTTPError) as e:
+                log.warning("gemini %s: %s", model, e)
+                _cooldown_until[model] = time.monotonic() + _OVERLOAD_COOLDOWN
+        raise TutorError("ai_busy")
+
+    async def check(self) -> list[dict]:
+        """One tiny request per configured model, reporting what Gemini says (for the admin check)."""
+        results = []
+        for model in [self.model] + [m for m in self.fallback_models if m != self.model]:
+            try:
+                r = await self.client.aio.models.generate_content(model=model, contents="Reply with the word OK.")
+                results.append({"model": model, "ok": True, "reply": (r.text or "").strip()[:50]})
+            except genai_errors.APIError as e:
+                violations = [
+                    v
+                    for d in (e.details or {}).get("error", {}).get("details", [])
+                    for v in d.get("violations", [])
+                ]
+                results.append(
+                    {"model": model, "ok": False, "code": e.code, "status": e.status, "message": (e.message or "")[:200], "quota": violations}
+                )
+            except httpx.HTTPError as e:
+                results.append({"model": model, "ok": False, "message": f"network: {e}"[:300]})
+        return results
+
+    async def explain(self, images, language, grade, subject):
+        contents = [genai_types.Part.from_bytes(data=img.data, mime_type=img.media_type) for img in images]
+        contents.append(
+            genai_types.Part.from_text(
+                text=prompts.EXPLAIN_USER.format(
+                    language=language_name(language),
+                    grade=grade or "unknown",
+                    subject_line=f"Subject: {subject}" if subject else "",
+                )
+            )
+        )
+        return await self._generate(contents, prompts.EXPLAIN_SYSTEM, LessonContent)
+
+    async def answer(self, lesson, history, question):
+        system = prompts.CHAT_SYSTEM.format(
+            language=language_name(lesson.language),
+            grade=lesson.grade or "unknown",
+            title=lesson.title,
+            subject=lesson.subject,
+            extracted_text=lesson.extracted_text,
+            explanation=json.dumps(lesson.explanation, ensure_ascii=False),
+        )
+        contents = [
+            genai_types.Content(role="model" if role == "assistant" else "user", parts=[genai_types.Part.from_text(text=text)])
+            for role, text in history
+        ]
+        contents.append(genai_types.Content(role="user", parts=[genai_types.Part.from_text(text=question)]))
+        return await self._generate(contents, system)
+
+    async def make_quiz(self, lesson, count):
+        prompt = prompts.QUIZ_USER.format(
+            language=language_name(lesson.language),
+            grade=lesson.grade or "unknown",
+            count=count,
+            title=lesson.title,
+            subject=lesson.subject,
+            extracted_text=lesson.extracted_text,
+            summary=lesson.explanation.get("summary", ""),
+        )
+        quiz: QuizContent = await self._generate(prompt, prompts.QUIZ_SYSTEM, QuizContent)
+        valid = [q for q in quiz.questions if len(q.options) == 4 and 0 <= q.correct_index < 4]
+        if not valid:
+            raise TutorError("ai_bad_quiz")
+        return QuizContent(questions=valid[:count])
+
+
 class FakeTutor:
     """Deterministic tutor for tests and for running the API without an Anthropic key."""
 
@@ -237,6 +375,10 @@ class FakeTutor:
 @lru_cache
 def get_tutor() -> Tutor:
     s = get_settings()
-    if s.ai_provider == "fake":
-        return FakeTutor()
-    return ClaudeTutor(anthropic.AsyncAnthropic(), s.claude_model, s.claude_effort)
+    provider = s.ai_provider or ("gemini" if s.gemini_api_key else "anthropic" if s.anthropic_api_key else "fake")
+    if provider == "gemini":
+        fallbacks = tuple(m.strip() for m in s.gemini_fallback_models.split(",") if m.strip())
+        return GeminiTutor(genai.Client(api_key=s.gemini_api_key), s.gemini_model, fallbacks)
+    if provider == "anthropic":
+        return ClaudeTutor(anthropic.AsyncAnthropic(api_key=s.anthropic_api_key or None), s.claude_model, s.claude_effort)
+    return FakeTutor()

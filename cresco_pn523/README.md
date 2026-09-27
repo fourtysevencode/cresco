@@ -25,6 +25,8 @@ Set the PN532's mode switches to **I2C**. LEDs and a buzzer are optional; set th
 2. Register the reader: dashboard → *Admin → Readers → Add reader* (or `POST /v1/admin/terminals`). Copy the `terminal_id` and `secret`; the secret is shown only once.
 3. Copy `config.h.example` to `config.h` and fill in WiFi, `API_BASE`, `TERMINAL_ID` and `TERMINAL_SECRET`. `config.h` is git-ignored.
 4. Upload, then open the Serial Monitor at 115200 baud. You should see `Online: School Canteen`.
+   - `Redirected` / `HTTP 308`: `API_BASE` must start with `https://` and have no trailing slash.
+   - `Rejected (401)`: wrong secret (issue a new one from the dashboard) or the clock didn't sync.
 
 ## How it works
 

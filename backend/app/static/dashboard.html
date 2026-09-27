@@ -20,7 +20,7 @@
     }
   }
   * { box-sizing: border-box; }
-  body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  body { margin: 0; background: var(--bg); color: var(--text); font-size: 15px; line-height: 1.45; }
   header { display: flex; align-items: center; gap: 16px; padding: 12px 20px; background: var(--surface); border-bottom: 1px solid var(--border); position: sticky; top: 0; z-index: 5; }
   header h1 { font-size: 18px; margin: 0; letter-spacing: .2px; }
   header .who { margin-left: auto; color: var(--muted); font-size: 14px; }
@@ -62,6 +62,30 @@
   .detect.found { border-color: var(--ok); background: var(--ok-bg); color: var(--ok); }
   .secret { background: var(--surface-2); border-radius: 8px; padding: 10px; word-break: break-all; }
   #login { max-width: 380px; margin: 10vh auto; }
+  body { font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans", "Noto Sans Tamil", "Noto Sans Kannada", "Noto Sans Telugu", "Noto Sans Bengali", "Noto Sans Devanagari", sans-serif; }
+  .thumbs { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
+  .thumbs img { width: 72px; height: 96px; object-fit: cover; border-radius: 6px; border: 1px solid var(--border); }
+  .drop { border: 2px dashed var(--border); border-radius: var(--radius); padding: 22px; text-align: center; cursor: pointer; }
+  .drop:hover { border-color: var(--accent); }
+  .spinner { display: inline-block; width: 18px; height: 18px; border: 3px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: spin 1s linear infinite; vertical-align: middle; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .lesson-body { font-size: 17px; line-height: 1.7; }
+  .section { padding: 14px 0; border-top: 1px solid var(--border); }
+  .section h3 { margin: 0 0 6px; font-size: 17px; }
+  .play { border: 1px solid var(--border); background: var(--surface-2); color: var(--text); border-radius: 999px; padding: 4px 12px; font: inherit; font-size: 13px; cursor: pointer; }
+  .play.playing { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
+  .chat { display: flex; flex-direction: column; gap: 8px; margin: 10px 0; }
+  .bubble { max-width: 85%; padding: 10px 12px; border-radius: 12px; white-space: pre-wrap; }
+  .bubble.user { align-self: flex-end; background: var(--accent); color: var(--accent-text); }
+  .bubble.assistant { align-self: flex-start; background: var(--surface-2); }
+  .q { padding: 14px 0; border-top: 1px solid var(--border); }
+  .q .opts { display: grid; gap: 8px; margin-top: 8px; }
+  .opt { text-align: left; padding: 10px 12px; border-radius: 8px; border: 1px solid var(--border); background: var(--surface-2); color: var(--text); font: inherit; cursor: pointer; }
+  .opt.chosen { border-color: var(--accent); outline: 2px solid var(--accent); outline-offset: -1px; }
+  .opt.right { background: var(--ok-bg); color: var(--ok); border-color: var(--ok); }
+  .opt.wrong { background: var(--bad-bg); color: var(--bad); border-color: var(--bad); }
+  .lesson-item { display: flex; justify-content: space-between; align-items: center; padding: 10px 0; border-top: 1px solid var(--border); cursor: pointer; }
+  .lesson-item:hover .title { color: var(--accent); }
   footer { text-align: center; padding: 20px; font-size: 13px; }
   footer a { color: var(--muted); }
   @media (max-width: 600px) { main { padding: 12px; } header { padding: 10px 12px; } nav { padding: 8px 12px 0; } th:nth-child(n+5), td:nth-child(n+5) { display: none; } }
@@ -181,7 +205,11 @@
 <template id="t-readers">
   <div class="card">
     <h2>Readers</h2>
-    <table><thead><tr><th>Reader</th><th>Shop</th><th>Status</th><th>Terminal ID</th></tr></thead><tbody id="rd-rows"></tbody></table>
+    <table><thead><tr><th>Reader</th><th>Shop</th><th>Status</th><th>Terminal ID</th><th></th></tr></thead><tbody id="rd-rows"></tbody></table>
+    <div id="rd-rotated" class="hidden">
+      <div class="msg ok">New secret issued. Copy these into <span class="mono">config.h</span> and re-upload; the old secret no longer works.</div>
+      <pre class="secret mono" id="rd-rotated-config"></pre>
+    </div>
   </div>
   <div class="grid">
     <div class="card">
@@ -213,6 +241,55 @@
   <div class="card">
     <h2>Recent taps</h2>
     <table><thead><tr><th>Time</th><th>Reader</th><th>Card serial</th><th>Student</th><th>Result</th></tr></thead><tbody id="tp-rows"></tbody></table>
+  </div>
+</template>
+
+<template id="t-learn">
+  <div id="l-home">
+    <div class="card">
+      <h2>Learn from your textbook</h2>
+      <p class="muted small" style="margin-top:0">Take a photo of a textbook page. Cresco explains it in your language, reads it aloud, and makes a quiz.</p>
+      <label class="drop" for="l-files">
+        <strong>📷 Take or choose photos</strong>
+        <div class="small muted">Up to 5 pages, in order</div>
+      </label>
+      <input id="l-files" type="file" accept="image/*" capture="environment" multiple class="hidden">
+      <div class="thumbs" id="l-thumbs"></div>
+      <div class="row" style="gap:12px">
+        <div style="flex:1;min-width:140px"><label for="l-lang">Explain in</label>
+          <select id="l-lang"><option value="ta">தமிழ் Tamil</option><option value="kn">ಕನ್ನಡ Kannada</option><option value="te">తెలుగు Telugu</option><option value="bn">বাংলা Bengali</option><option value="mr">मराठी Marathi</option><option value="hi">हिन्दी Hindi</option><option value="en">English</option></select></div>
+        <div style="flex:1;min-width:140px"><label for="l-subject">Subject (optional)</label><input id="l-subject" placeholder="Science"></div>
+      </div>
+      <div class="row" style="margin-top:14px"><button class="btn primary" id="l-go" disabled>Explain these pages</button><span id="l-busy" class="muted small hidden"><span class="spinner"></span> Reading your pages… this can take up to a minute</span></div>
+      <div id="l-msg" class="msg hidden"></div>
+    </div>
+    <div class="card">
+      <h2>My lessons</h2>
+      <div id="l-list"></div>
+    </div>
+  </div>
+
+  <div id="l-lesson" class="hidden">
+    <div class="row" style="margin-bottom:12px"><button class="btn" id="l-back">← My lessons</button></div>
+    <div class="card lesson-body">
+      <div class="row" style="justify-content:space-between"><h2 id="l-title" style="margin:0"></h2><span class="pill" id="l-meta"></span></div>
+      <div style="margin-top:12px"><button class="play" data-audio="">🔊 Listen</button></div>
+      <p id="l-summary"></p>
+      <div id="l-sections"></div>
+      <div id="l-terms-wrap" class="section"><h3>Key words</h3><table><tbody id="l-terms"></tbody></table></div>
+    </div>
+    <div class="card">
+      <h2>Ask the tutor</h2>
+      <div class="chat" id="l-chat"></div>
+      <form id="l-ask" class="row"><input id="l-question" placeholder="Explain it again more simply…" style="flex:1;min-width:0" required><button class="btn primary" type="submit">Ask</button></form>
+      <div id="l-ask-busy" class="muted small hidden" style="margin-top:6px"><span class="spinner"></span> Thinking…</div>
+    </div>
+    <div class="card">
+      <div class="row" style="justify-content:space-between"><h2 style="margin:0">Quiz</h2><button class="btn primary" id="l-quiz-go">Start a quiz</button></div>
+      <div id="l-quiz-busy" class="muted small hidden" style="margin-top:8px"><span class="spinner"></span> Writing your quiz…</div>
+      <div id="l-quiz"></div>
+      <div id="l-quiz-msg" class="msg hidden"></div>
+    </div>
   </div>
 </template>
 
@@ -251,25 +328,36 @@ function show(el, text, ok) {
 function errText(e) {
   const d = e.detail;
   if (Array.isArray(d)) return d.map((x) => x.msg.replace(/^Value error, /, "")).join("; ");
-  if (d && typeof d === "object") return d.code === "card_in_use" ? `That card already belongs to ${d.student_name}.` : JSON.stringify(d);
-  return { account_exists: "That email or phone is already used.", invalid_credentials: "Wrong email/phone or password." }[d] || d || "Something went wrong";
+  if (d && typeof d === "object") {
+    if (d.code === "card_in_use") return `That card already belongs to ${d.student_name}.`;
+    if (d.code === "unreadable_photo") return `Couldn't read the photo. ${d.tip || "Try again in good light, with the whole page in view."}`;
+    return JSON.stringify(d);
+  }
+  return {
+    account_exists: "That email or phone is already used.", invalid_credentials: "Wrong email/phone or password.",
+    ai_busy: "The tutor is busy right now. Try again in a minute.", ai_unavailable: "The tutor can't be reached right now. Try again soon.",
+    ai_refused: "The tutor couldn't help with this page.", ai_bad_output: "The tutor got confused. Please try again.", ai_bad_quiz: "Couldn't make a quiz this time. Please try again.",
+    ai_output_truncated: "That was too long for the tutor. Try fewer pages.", image_too_large: "A photo is too large.", unsupported_image: "Please use JPEG or PNG photos.",
+    too_many_images: "Use 1 to 5 photos.", tts_not_configured: "Read-aloud isn't set up on the server.", tts_failed: "Couldn't make the audio. Try again.",
+  }[d] || d || "Something went wrong";
 }
 
 // ---------------------------------------------------------------- auth + API
 let tokens = null, me = null;
 try { tokens = JSON.parse(localStorage.getItem("cresco.tokens")); } catch {}
 
-async function api(path, { method = "GET", body } = {}, retried = false) {
+async function api(path, { method = "GET", body, form, blob } = {}, retried = false) {
   const res = await fetch(`/v1${path}`, {
     method,
     headers: { ...(body ? { "Content-Type": "application/json" } : {}), ...(tokens ? { Authorization: `Bearer ${tokens.access_token}` } : {}) },
-    body: body ? JSON.stringify(body) : undefined,
+    body: form || (body ? JSON.stringify(body) : undefined),
   });
   if (res.status === 401 && tokens && !retried && path !== "/auth/refresh") {
     const r = await fetch("/v1/auth/refresh", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ refresh_token: tokens.refresh_token }) });
-    if (r.ok) { saveTokens(await r.json()); return api(path, { method, body }, true); }
+    if (r.ok) { saveTokens(await r.json()); return api(path, { method, body, form, blob }, true); }
     logout(); throw { detail: "Session expired" };
   }
+  if (blob && res.ok) return res.blob();
   const data = res.status === 204 ? null : await res.json().catch(() => null);
   if (!res.ok) throw data || { detail: `HTTP ${res.status}` };
   return data;
@@ -291,7 +379,7 @@ const TABS = {
   admin: [["counter", "Counter"], ["students", "Students"], ["register", "Register"], ["readers", "Readers"], ["taps", "Taps"]],
   merchant_staff: [["counter", "Counter"]],
   parent: [["parent", "My children"]],
-  student: [["student", "Me"]],
+  student: [["learn", "Learn"], ["student", "Wallet"]],
 };
 let timers = [];
 function stopTimers() { timers.forEach(clearInterval); timers = []; }
@@ -312,7 +400,8 @@ function open(tab) {
   $("#tabs").querySelectorAll("button").forEach((b) => b.classList.toggle("active", b.dataset.tab === tab));
   const view = $("#view");
   view.replaceChildren($(`#t-${tab}`).content.cloneNode(true));
-  ({ counter, students, register, readers, taps, parent, student })[tab](view);
+  stopAudio();
+  ({ counter, students, register, readers, taps, parent, student, learn })[tab](view);
 }
 
 // ---------------------------------------------------------------- counter (cashier)
@@ -473,6 +562,8 @@ async function register(view) {
 }
 
 // ---------------------------------------------------------------- admin: readers
+const configSnippet = (c) => `#define API_BASE "${location.origin}"\n#define TERMINAL_ID "${c.terminal_id}"\n#define TERMINAL_SECRET "${c.secret}"`;
+
 async function readers(view) {
   const load = async () => {
     const list = await api("/admin/terminals");
@@ -480,8 +571,17 @@ async function readers(view) {
       const online = t.last_seen_at && Date.now() - new Date(t.last_seen_at) < 3 * 60 * 1000;
       return `<tr><td>${esc(t.name)}</td><td>${esc(t.merchant_name)}</td>
         <td><span class="pill ${online ? "ok" : ""}">${online ? "online" : t.last_seen_at ? `seen ${ago(t.last_seen_at)}` : "never connected"}</span></td>
-        <td class="mono small">${t.id}</td></tr>`;
-    }).join("") || `<tr><td colspan="4" class="muted">No readers yet.</td></tr>`;
+        <td class="mono small">${t.id}</td>
+        <td class="num"><button class="btn small" data-rotate="${t.id}" data-name="${esc(t.name)}">New secret</button></td></tr>`;
+    }).join("") || `<tr><td colspan="5" class="muted">No readers yet.</td></tr>`;
+    $("#rd-rows", view).querySelectorAll("[data-rotate]").forEach((b) => b.addEventListener("click", async () => {
+      if (!confirm(`Issue a new secret for ${b.dataset.name}? It stops working until you put the new secret in its config.h.`)) return;
+      try {
+        const c = await api(`/admin/terminals/${b.dataset.rotate}/rotate-secret`, { method: "POST" });
+        $("#rd-rotated-config", view).textContent = configSnippet(c);
+        $("#rd-rotated", view).classList.remove("hidden");
+      } catch (e) { alert(errText(e)); }
+    }));
     const shops = await api("/admin/merchants");
     $("#rd-shop", view).innerHTML = shops.map((m) => `<option value="${m.id}">${esc(m.name)}</option>`).join("");
   };
@@ -489,7 +589,7 @@ async function readers(view) {
     ev.preventDefault();
     try {
       const c = await api("/admin/terminals", { method: "POST", body: { merchant_id: $("#rd-shop", view).value, name: $("#rd-name", view).value.trim() } });
-      $("#rd-config", view).textContent = `#define API_BASE "${location.origin}"\n#define TERMINAL_ID "${c.terminal_id}"\n#define TERMINAL_SECRET "${c.secret}"`;
+      $("#rd-config", view).textContent = configSnippet(c);
       $("#rd-secret", view).classList.remove("hidden"); ev.target.reset(); load();
     } catch (e) { alert(errText(e)); }
   });
@@ -570,6 +670,164 @@ async function student(view) {
   $("#st-rank", view).textContent = p.rank_this_week ? `Rank #${p.rank_this_week} in school` : "Take a quiz to get on the leaderboard";
   const txns = await api(`/wallets/${me.id}/transactions?limit=10`);
   $("#st-txns", view).innerHTML = txns.map((t) => `<tr><td class="small muted">${new Date(t.created_at).toLocaleDateString("en-IN")}</td><td>${esc(t.description || t.type)}</td><td class="num">${money(t.amount_paise)}</td></tr>`).join("");
+}
+
+// ---------------------------------------------------------------- student: learn (photo → lesson → audio, Q&A, quiz)
+const LANGS = { ta: "Tamil", kn: "Kannada", te: "Telugu", bn: "Bengali", mr: "Marathi", hi: "Hindi", en: "English" };
+const MAX_UPLOAD = 4 * 1024 * 1024;  // Vercel caps request bodies at 4.5 MB
+
+// Phone photos are often 5-10 MB; shrink to ~1600px JPEG, which is plenty for reading text.
+async function shrink(file, maxSide = 1600, quality = 0.82) {
+  let bmp;
+  try { bmp = await createImageBitmap(file, { imageOrientation: "from-image" }); } catch { return file; }
+  const scale = Math.min(1, maxSide / Math.max(bmp.width, bmp.height));
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.round(bmp.width * scale); canvas.height = Math.round(bmp.height * scale);
+  canvas.getContext("2d").drawImage(bmp, 0, 0, canvas.width, canvas.height);
+  return new Promise((resolve) => canvas.toBlob((b) => resolve(b || file), "image/jpeg", quality));
+}
+
+let audio = null, audioBtn = null;
+function stopAudio() { if (audio) { audio.pause(); audio = null; } if (audioBtn) { audioBtn.classList.remove("playing"); audioBtn.textContent = "🔊 Listen"; audioBtn = null; } }
+async function playAudio(btn, path) {
+  if (audioBtn === btn) { stopAudio(); return; }
+  stopAudio();
+  audioBtn = btn; btn.textContent = "⏳ Loading…";
+  try {
+    const blob = await api(path, { blob: true });
+    if (audioBtn !== btn) return;
+    audio = new Audio(URL.createObjectURL(blob));
+    btn.classList.add("playing"); btn.textContent = "⏸ Stop";
+    audio.addEventListener("ended", stopAudio);
+    await audio.play();
+  } catch (e) { stopAudio(); alert(errText(e)); }
+}
+
+async function learn(view) {
+  const home = $("#l-home", view), lessonView = $("#l-lesson", view);
+  const files = $("#l-files", view), go = $("#l-go", view), msg = $("#l-msg", view);
+  if (me.preferred_language) $("#l-lang", view).value = me.preferred_language;
+  let pages = [];
+
+  files.addEventListener("change", async () => {
+    msg.classList.add("hidden");
+    const chosen = [...files.files].slice(0, 5);
+    if (files.files.length > 5) show(msg, "Only the first 5 photos will be used.", false);
+    pages = await Promise.all(chosen.map((f) => shrink(f)));
+    $("#l-thumbs", view).innerHTML = "";
+    pages.forEach((p) => { const img = document.createElement("img"); img.src = URL.createObjectURL(p); $("#l-thumbs", view).append(img); });
+    go.disabled = !pages.length;
+  });
+
+  go.addEventListener("click", async () => {
+    const total = pages.reduce((t, p) => t + p.size, 0);
+    if (total > MAX_UPLOAD) { show(msg, "These photos are too large together. Try fewer pages.", false); return; }
+    const form = new FormData();
+    pages.forEach((p, i) => form.append("images", p, `page${i + 1}.jpg`));
+    form.append("language", $("#l-lang", view).value);
+    if ($("#l-subject", view).value.trim()) form.append("subject", $("#l-subject", view).value.trim());
+    go.disabled = true; $("#l-busy", view).classList.remove("hidden"); msg.classList.add("hidden");
+    try {
+      const lesson = await api("/lessons", { method: "POST", form });
+      pages = []; files.value = ""; $("#l-thumbs", view).innerHTML = "";
+      openLesson(lesson);
+    } catch (e) { show(msg, errText(e), false); go.disabled = false; }
+    finally { $("#l-busy", view).classList.add("hidden"); }
+  });
+
+  async function loadList() {
+    const lessons = await api("/lessons");
+    $("#l-list", view).innerHTML = lessons.map((l) => `<div class="lesson-item" data-id="${l.id}">
+        <div><div class="title"><strong>${esc(l.title)}</strong></div><div class="small muted">${esc(l.subject)} · ${LANGS[l.language] || l.language} · ${new Date(l.created_at).toLocaleDateString("en-IN")}</div></div><span class="muted">›</span></div>`).join("")
+      || `<p class="muted">No lessons yet. Take a photo of a page to start.</p>`;
+    $("#l-list", view).querySelectorAll("[data-id]").forEach((el) => el.addEventListener("click", async () => openLesson(await api(`/lessons/${el.dataset.id}`))));
+  }
+
+  function renderChat(messages) {
+    $("#l-chat", view).innerHTML = messages.map((m, i) => `<div class="bubble ${m.role}">${esc(m.content)}${m.role === "assistant" ? `<div style="margin-top:6px"><button class="play" data-msg="${i}">🔊 Listen</button></div>` : ""}</div>`).join("");
+  }
+
+  let current = null;
+  function openLesson(lesson) {
+    current = lesson; stopAudio();
+    home.classList.add("hidden"); lessonView.classList.remove("hidden"); window.scrollTo(0, 0);
+    $("#l-title", view).textContent = lesson.title;
+    $("#l-meta", view).textContent = `${lesson.subject} · ${LANGS[lesson.language] || lesson.language}`;
+    $("#l-summary", view).textContent = lesson.explanation.summary;
+    $("#l-sections", view).innerHTML = lesson.explanation.sections.map((sec, i) => `<div class="section">
+        <div class="row" style="justify-content:space-between"><h3>${esc(sec.heading)}</h3><button class="play" data-section="${i}">🔊 Listen</button></div>
+        <div style="white-space:pre-wrap">${esc(sec.body)}</div></div>`).join("");
+    const terms = lesson.explanation.key_terms || [];
+    $("#l-terms-wrap", view).classList.toggle("hidden", !terms.length);
+    $("#l-terms", view).innerHTML = terms.map((t) => `<tr><td><strong>${esc(t.english)}</strong></td><td>${esc(t.native)}</td><td class="muted">${esc(t.meaning)}</td></tr>`).join("");
+    renderChat(lesson.messages || []);
+    $("#l-quiz", view).innerHTML = ""; $("#l-quiz-msg", view).classList.add("hidden"); $("#l-quiz-go", view).disabled = false;
+  }
+
+  // One listener for all 🔊 buttons in the lesson (summary, sections, chat replies).
+  lessonView.addEventListener("click", (ev) => {
+    const b = ev.target.closest(".play");
+    if (!b || !current) return;
+    if (b.dataset.section !== undefined) playAudio(b, `/lessons/${current.id}/audio?section=${b.dataset.section}`);
+    else if (b.dataset.msg !== undefined) playAudio(b, `/lessons/${current.id}/messages/${b.dataset.msg}/audio`);
+    else playAudio(b, `/lessons/${current.id}/audio`);
+  });
+
+  $("#l-back", view).addEventListener("click", () => { stopAudio(); current = null; lessonView.classList.add("hidden"); home.classList.remove("hidden"); loadList(); });
+
+  $("#l-ask", view).addEventListener("submit", async (ev) => {
+    ev.preventDefault();
+    const q = $("#l-question", view).value.trim();
+    if (!q) return;
+    const messages = [...(current.messages || []), { role: "user", content: q }];
+    renderChat(messages); $("#l-question", view).value = ""; $("#l-ask-busy", view).classList.remove("hidden");
+    try {
+      const reply = await api(`/lessons/${current.id}/messages`, { method: "POST", body: { question: q } });
+      current.messages = [...messages, reply];
+    } catch (e) { current.messages = messages.slice(0, -1); alert(errText(e)); }
+    finally { renderChat(current.messages); $("#l-ask-busy", view).classList.add("hidden"); }
+  });
+
+  $("#l-quiz-go", view).addEventListener("click", async () => {
+    const box = $("#l-quiz", view), qmsg = $("#l-quiz-msg", view);
+    $("#l-quiz-go", view).disabled = true; $("#l-quiz-busy", view).classList.remove("hidden"); qmsg.classList.add("hidden"); box.innerHTML = ""; delete box.dataset.done;
+    let quiz;
+    try { quiz = await api(`/lessons/${current.id}/quiz`, { method: "POST" }); }
+    catch (e) { show(qmsg, errText(e), false); $("#l-quiz-go", view).disabled = false; return; }
+    finally { $("#l-quiz-busy", view).classList.add("hidden"); }
+    const answers = new Array(quiz.questions.length).fill(null);
+    box.innerHTML = quiz.questions.map((q, i) => `<div class="q" data-q="${i}"><strong>${i + 1}. ${esc(q.question)}</strong>
+        <div class="opts">${q.options.map((o, j) => `<button class="opt" data-q="${i}" data-o="${j}">${esc(o)}</button>`).join("")}</div>
+        <div class="small explain" style="margin-top:6px"></div></div>`).join("")
+      + `<div class="row" style="margin-top:14px"><button class="btn primary" id="l-submit" disabled>Submit answers</button></div>`;
+    box.querySelectorAll(".opt").forEach((b) => b.addEventListener("click", () => {
+      if (box.dataset.done) return;
+      const qi = Number(b.dataset.q);
+      answers[qi] = Number(b.dataset.o);
+      box.querySelectorAll(`.opt[data-q="${qi}"]`).forEach((x) => x.classList.toggle("chosen", x === b));
+      $("#l-submit", box).disabled = answers.includes(null);
+    }));
+    $("#l-submit", box).addEventListener("click", async () => {
+      $("#l-submit", box).disabled = true;
+      try {
+        const r = await api(`/quizzes/${quiz.id}/attempts`, { method: "POST", body: { answers } });
+        box.dataset.done = "1";
+        r.results.forEach((res, i) => {
+          box.querySelectorAll(`.opt[data-q="${i}"]`).forEach((x) => {
+            const o = Number(x.dataset.o);
+            if (o === res.correct_index) x.classList.add("right");
+            else if (o === res.your_answer) x.classList.add("wrong");
+          });
+          $(`.q[data-q="${i}"] .explain`, box).textContent = `${res.correct ? "✅" : "❌"} ${res.explanation}`;
+        });
+        const pts = r.points_awarded ? `+${r.points_awarded} points!` : r.no_points_reason === "retry_not_scored" ? "Retries don't earn points." : r.no_points_reason === "daily_quiz_limit" ? "You've reached today's points limit — keep practising!" : "No points this time.";
+        show(qmsg, `You got ${r.correct_count} of ${r.total} right. ${pts}`, r.correct_count >= r.total / 2);
+        $("#l-quiz-go", view).disabled = false; $("#l-quiz-go", view).textContent = "New quiz";
+      } catch (e) { show(qmsg, errText(e), false); $("#l-submit", box).disabled = false; }
+    });
+  });
+
+  await loadList();
 }
 
 // ---------------------------------------------------------------- boot

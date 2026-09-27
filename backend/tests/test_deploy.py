@@ -47,3 +47,20 @@ async def test_cors_preflight(client):
         headers={"Origin": "https://cresco-web.vercel.app", "Access-Control-Request-Method": "POST", "Access-Control-Request-Headers": "content-type"},
     )
     assert r.status_code == 200 and r.headers["access-control-allow-origin"] == "*"
+
+
+def test_ai_provider_selection(monkeypatch):
+    from app.services import ai_tutor
+
+    s = get_settings()
+    pick = lambda: type(ai_tutor.get_tutor.__wrapped__()).__name__  # noqa: E731  (bypass the cache)
+    monkeypatch.setattr(s, "ai_provider", "")
+    monkeypatch.setattr(s, "gemini_api_key", "")
+    monkeypatch.setattr(s, "anthropic_api_key", "")
+    assert pick() == "FakeTutor"
+    monkeypatch.setattr(s, "anthropic_api_key", "sk-test")
+    assert pick() == "ClaudeTutor"
+    monkeypatch.setattr(s, "gemini_api_key", "g-test")
+    assert pick() == "GeminiTutor"  # Gemini wins when both keys are set
+    monkeypatch.setattr(s, "ai_provider", "fake")
+    assert pick() == "FakeTutor"
