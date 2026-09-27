@@ -3,6 +3,8 @@ import uuid
 
 from pydantic import BaseModel, Field
 
+from app.services.languages import LanguageCode
+
 
 class SectionOut(BaseModel):
     heading: str
@@ -41,6 +43,14 @@ class LessonOut(LessonSummary):
     explanation: ExplanationOut
     messages: list[MessageOut] = []
     deduplicated: bool = False
+
+
+class TextLessonIn(BaseModel):
+    """Text the student's device already read from the page (OCR)."""
+
+    text: str = Field(min_length=20, max_length=30_000)
+    language: LanguageCode | None = None
+    subject: str | None = Field(default=None, max_length=100)
 
 
 class AskIn(BaseModel):

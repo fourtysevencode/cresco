@@ -36,9 +36,10 @@ _FALLBACK_BETA = "server-side-fallback-2026-07-01"
 
 
 class TutorError(Exception):
-    def __init__(self, code: str):
+    def __init__(self, code: str, details: list[str] | None = None):
         super().__init__(code)
         self.code = code
+        self.details = details or []  # e.g. which models failed and why, shown to help diagnose
 
 
 class Section(BaseModel):
@@ -57,6 +58,17 @@ class LessonContent(BaseModel):
     title: str
     subject: str
     extracted_text: str
+    summary: str
+    sections: list[Section]
+    key_terms: list[KeyTerm]
+
+
+class TextLessonContent(BaseModel):
+    """A lesson explained from OCR'd text: the model doesn't need to transcribe the page."""
+
+    readable: bool
+    title: str
+    subject: str
     summary: str
     sections: list[Section]
     key_terms: list[KeyTerm]
@@ -93,6 +105,8 @@ class Tutor(Protocol):
     async def explain(
         self, images: list[PageImage], language: str, grade: int | None, subject: str | None
     ) -> LessonContent: ...
+
+    async def explain_text(self, text: str, language: str, grade: int | None, subject: str | None) -> TextLessonContent: ...
 
     async def answer(self, lesson: LessonContext, history: list[tuple[str, str]], question: str) -> str: ...
 
@@ -159,6 +173,27 @@ class ClaudeTutor:
         self._check(response)
         return response.parsed_output
 
+    async def explain_text(self, text, language, grade, subject):
+        response = await self._call(
+            self.client.beta.messages.parse,
+            system=prompts.EXPLAIN_TEXT_SYSTEM,
+            messages=[
+                {
+                    "role": "user",
+                    "content": prompts.EXPLAIN_TEXT_USER.format(
+                        language=language_name(language),
+                        grade=grade or "unknown",
+                        subject_line=f"Subject: {subject}" if subject else "",
+                        text=text,
+                    ),
+                }
+            ],
+            output_config={"effort": self.effort},
+            output_format=TextLessonContent,
+        )
+        self._check(response)
+        return response.parsed_output
+
     async def answer(self, lesson, history, question):
         system = prompts.CHAT_SYSTEM.format(
             language=language_name(lesson.language),
@@ -214,6 +249,7 @@ def _b64(data: bytes) -> str:
 
 # Models that just failed are skipped for a while (per server instance), so a request doesn't wait on
 # a model that is out of quota or overloaded before reaching one that works.
+_MAX_OUTPUT_TOKENS = 32768
 _QUOTA_COOLDOWN = 15 * 60  # seconds, after a 429 (the free tier's limit is per day)
 _OVERLOAD_COOLDOWN = 60  # seconds, after a 5xx / network error
 _cooldown_until: dict[str, float] = {}
@@ -233,6 +269,8 @@ class GeminiTutor:
             response_mime_type="application/json" if schema else None,
             response_schema=schema,
             automatic_function_calling=genai_types.AutomaticFunctionCallingConfig(disable=True),  # no tools used
+            # A dense page explained in an Indic script is long; don't cut it off.
+            max_output_tokens=_MAX_OUTPUT_TOKENS,
         )
         response = await self._call_with_fallback(contents, config)
         feedback = response.prompt_feedback
@@ -259,18 +297,25 @@ class GeminiTutor:
         models = [self.model] + [m for m in self.fallback_models if m != self.model]
         now = time.monotonic()
         ready = [m for m in models if _cooldown_until.get(m, 0) <= now] or models  # all cooling down: try anyway
+        failures: list[str] = []
         for model in ready:
             try:
                 return await self.client.aio.models.generate_content(model=model, contents=contents, config=config)
             except genai_errors.ClientError as e:
                 log.warning("gemini %s: HTTP %s %s", model, e.code, e.message)
+                failures.append(f"{model}: {e.code} {e.status}")
                 if e.code != 429:
-                    raise TutorError("ai_bad_request")
+                    raise TutorError("ai_bad_request", failures)
                 _cooldown_until[model] = time.monotonic() + _QUOTA_COOLDOWN
-            except (genai_errors.APIError, httpx.HTTPError) as e:
+            except genai_errors.APIError as e:
                 log.warning("gemini %s: %s", model, e)
+                failures.append(f"{model}: {e.code} {e.status}")
                 _cooldown_until[model] = time.monotonic() + _OVERLOAD_COOLDOWN
-        raise TutorError("ai_busy")
+            except httpx.HTTPError as e:
+                log.warning("gemini %s: %s", model, e)
+                failures.append(f"{model}: network error")
+                _cooldown_until[model] = time.monotonic() + _OVERLOAD_COOLDOWN
+        raise TutorError("ai_busy", failures)
 
     async def check(self) -> list[dict]:
         """One tiny request per configured model, reporting what Gemini says (for the admin check)."""
@@ -304,6 +349,15 @@ class GeminiTutor:
             )
         )
         return await self._generate(contents, prompts.EXPLAIN_SYSTEM, LessonContent)
+
+    async def explain_text(self, text, language, grade, subject):
+        prompt = prompts.EXPLAIN_TEXT_USER.format(
+            language=language_name(language),
+            grade=grade or "unknown",
+            subject_line=f"Subject: {subject}" if subject else "",
+            text=text,
+        )
+        return await self._generate(prompt, prompts.EXPLAIN_TEXT_SYSTEM, TextLessonContent)
 
     async def answer(self, lesson, history, question):
         system = prompts.CHAT_SYSTEM.format(
@@ -353,6 +407,19 @@ class FakeTutor:
                 Section(heading="What do plants need?", body=f"[{language}] Water, carbon dioxide and sunlight."),
             ],
             key_terms=[KeyTerm(english="photosynthesis", native=f"[{language}] photosynthesis", meaning="making food")],
+        )
+
+    async def explain_text(self, text, language, grade, subject):
+        if sum(any(c.isalpha() for c in w) for w in text.split()) < 5:
+            return TextLessonContent(readable=False, title="", subject="", summary=f"[{language}] Scan again", sections=[], key_terms=[])
+        first_line = text.strip().splitlines()[0][:80]
+        return TextLessonContent(
+            readable=True,
+            title=first_line,
+            subject=subject or "General",
+            summary=f"[{language}] Summary of: {first_line}",
+            sections=[Section(heading="Main idea", body=f"[{language}] {text[:120]}")],
+            key_terms=[],
         )
 
     async def answer(self, lesson, history, question):

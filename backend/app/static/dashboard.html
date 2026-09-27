@@ -260,7 +260,7 @@
           <select id="l-lang"><option value="ta">தமிழ் Tamil</option><option value="kn">ಕನ್ನಡ Kannada</option><option value="te">తెలుగు Telugu</option><option value="bn">বাংলা Bengali</option><option value="mr">मराठी Marathi</option><option value="hi">हिन्दी Hindi</option><option value="en">English</option></select></div>
         <div style="flex:1;min-width:140px"><label for="l-subject">Subject (optional)</label><input id="l-subject" placeholder="Science"></div>
       </div>
-      <div class="row" style="margin-top:14px"><button class="btn primary" id="l-go" disabled>Explain these pages</button><span id="l-busy" class="muted small hidden"><span class="spinner"></span> Reading your pages… this can take up to a minute</span></div>
+      <div class="row" style="margin-top:14px"><button class="btn primary" id="l-go" disabled>Explain these pages</button><span id="l-busy" class="muted small hidden"><span class="spinner"></span> <span id="l-busy-text">Reading your pages…</span></span></div>
       <div id="l-msg" class="msg hidden"></div>
     </div>
     <div class="card">
@@ -330,7 +330,8 @@ function errText(e) {
   if (Array.isArray(d)) return d.map((x) => x.msg.replace(/^Value error, /, "")).join("; ");
   if (d && typeof d === "object") {
     if (d.code === "card_in_use") return `That card already belongs to ${d.student_name}.`;
-    if (d.code === "unreadable_photo") return `Couldn't read the photo. ${d.tip || "Try again in good light, with the whole page in view."}`;
+    if (d.code === "unreadable_photo" || d.code === "unreadable_text") return `Couldn't read the page. ${d.tip || "Try again in good light, with the whole page in view."}`;
+    if (d.code) return errText({ detail: d.code }) + (d.details?.length ? ` (${d.details.join("; ")})` : "");
     return JSON.stringify(d);
   }
   return {
@@ -687,6 +688,41 @@ async function shrink(file, maxSide = 1600, quality = 0.82) {
   return new Promise((resolve) => canvas.toBlob((b) => resolve(b || file), "image/jpeg", quality));
 }
 
+// ---- OCR in the browser (Tesseract.js, free, runs on the device) ----
+const TESSERACT_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@7/dist/tesseract.min.js";
+const MIN_OCR_WORDS = 30;  // fewer words than this (e.g. a page of diagrams): send the photo instead
+let tesseractLoading = null;
+function loadTesseract() {
+  if (window.Tesseract) return Promise.resolve(window.Tesseract);
+  tesseractLoading ||= new Promise((resolve, reject) => {
+    const s = document.createElement("script");
+    s.src = TESSERACT_URL; s.async = true;
+    s.onload = () => resolve(window.Tesseract);
+    s.onerror = () => { tesseractLoading = null; reject(new Error("couldn't load OCR")); };
+    document.head.append(s);
+  });
+  return tesseractLoading;
+}
+async function ocrPages(pages, onStatus) {
+  onStatus("Loading the text reader…");
+  const Tesseract = await loadTesseract();
+  let page = 0;
+  const worker = await Tesseract.createWorker("eng", 1, {
+    logger: (m) => {
+      if (m.status === "recognizing text") onStatus(`Reading text from page ${page + 1} of ${pages.length}… ${Math.round(m.progress * 100)}%`);
+      else if (m.status && m.status.includes("load")) onStatus("Loading the text reader…");
+    },
+  });
+  try {
+    const texts = [];
+    for (page = 0; page < pages.length; page++) {
+      const { data } = await worker.recognize(pages[page]);
+      texts.push(data.text.trim());
+    }
+    return texts.join("\n\n").trim();
+  } finally { await worker.terminate(); }
+}
+
 let audio = null, audioBtn = null;
 function stopAudio() { if (audio) { audio.pause(); audio = null; } if (audioBtn) { audioBtn.classList.remove("playing"); audioBtn.textContent = "🔊 Listen"; audioBtn = null; } }
 async function playAudio(btn, path) {
@@ -719,16 +755,31 @@ async function learn(view) {
     go.disabled = !pages.length;
   });
 
+  const busyText = (t) => { $("#l-busy-text", view).textContent = t; };
+
   go.addEventListener("click", async () => {
-    const total = pages.reduce((t, p) => t + p.size, 0);
-    if (total > MAX_UPLOAD) { show(msg, "These photos are too large together. Try fewer pages.", false); return; }
-    const form = new FormData();
-    pages.forEach((p, i) => form.append("images", p, `page${i + 1}.jpg`));
-    form.append("language", $("#l-lang", view).value);
-    if ($("#l-subject", view).value.trim()) form.append("subject", $("#l-subject", view).value.trim());
+    const language = $("#l-lang", view).value, subject = $("#l-subject", view).value.trim();
     go.disabled = true; $("#l-busy", view).classList.remove("hidden"); msg.classList.add("hidden");
     try {
-      const lesson = await api("/lessons", { method: "POST", form });
+      // 1. Read the text on the phone/computer (free OCR). Sending text instead of photos is much
+      //    lighter for the AI, so it's faster and uses less of the free quota.
+      let text = "";
+      try { text = await ocrPages(pages, busyText); } catch (e) { console.warn("OCR failed, sending photos instead", e); }
+      let lesson;
+      if (text.split(/\s+/).filter(Boolean).length >= MIN_OCR_WORDS) {
+        busyText("Explaining… this can take up to a minute");
+        lesson = await api("/lessons/text", { method: "POST", body: { text, language, subject: subject || null } });
+      } else {
+        // 2. Too little text found (e.g. mostly diagrams): let the AI look at the photos instead.
+        const total = pages.reduce((t, p) => t + p.size, 0);
+        if (total > MAX_UPLOAD) throw { detail: "These photos are too large together. Try fewer pages." };
+        busyText("Reading your pages… this can take up to a minute");
+        const form = new FormData();
+        pages.forEach((p, i) => form.append("images", p, `page${i + 1}.jpg`));
+        form.append("language", language);
+        if (subject) form.append("subject", subject);
+        lesson = await api("/lessons", { method: "POST", form });
+      }
       pages = []; files.value = ""; $("#l-thumbs", view).innerHTML = "";
       openLesson(lesson);
     } catch (e) { show(msg, errText(e), false); go.disabled = false; }
