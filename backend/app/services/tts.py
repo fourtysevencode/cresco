@@ -1,10 +1,15 @@
-"""Text-to-speech for the tutor's explanations.
+"""Text-to-speech for the tutor's explanations, returned as MP3 so any browser can play it.
 
-Default provider is Google Cloud Text-to-Speech (REST + API key): it has voices for every language
-we support and a free monthly character allowance. Audio is cached by content hash, so each piece
-of text is synthesised once no matter how many students replay it. To self-host a fully free model
-instead (e.g. AI4Bharat Indic Parler-TTS on a GPU box), add a class with the same `synthesize`
-signature and select it in `get_tts()`.
+Providers:
+- "edge" (default): Microsoft Edge's neural read-aloud voices via the `edge-tts` package. Free, no API
+  key, natural voices for every language we support. It is an unofficial use of Edge's public
+  endpoint, so it may change without notice — fine for the demo; revisit before production.
+- "google": Google Cloud Text-to-Speech (needs an API key on a billing-enabled project).
+- "fake": deterministic bytes for tests.
+
+Audio is cached by content hash, so each piece of text is synthesised once no matter how many
+students replay it. To self-host a model instead (e.g. AI4Bharat Indic Parler-TTS on a GPU), add a
+class with the same `synthesize` signature and select it in `get_tts()`.
 """
 
 import base64
@@ -12,6 +17,7 @@ import hashlib
 import re
 from typing import Protocol
 
+import edge_tts
 import httpx
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -92,6 +98,42 @@ class GoogleTTS:
         return audio
 
 
+# Default voice per language (all Microsoft neural voices). Override with EDGE_TTS_VOICES.
+EDGE_VOICES = {
+    "ta": "ta-IN-PallaviNeural",
+    "kn": "kn-IN-SapnaNeural",
+    "te": "te-IN-ShrutiNeural",
+    "bn": "bn-IN-TanishaaNeural",
+    "mr": "mr-IN-AarohiNeural",
+    "hi": "hi-IN-SwaraNeural",
+    "en": "en-IN-NeerjaNeural",
+}
+
+
+class EdgeTTS:
+    name = "edge"
+
+    def __init__(self, voices: dict[str, str]):
+        self.voices = {**EDGE_VOICES, **voices}
+
+    def voice(self, language: str) -> str:
+        return self.voices[language]
+
+    async def synthesize(self, text: str, language: str) -> bytes:
+        # Slightly slower than normal: easier for young listeners to follow.
+        communicate = edge_tts.Communicate(text, self.voice(language), rate="-10%")
+        audio = bytearray()
+        try:
+            async for chunk in communicate.stream():
+                if chunk["type"] == "audio":
+                    audio += chunk["data"]
+        except edge_tts.exceptions.EdgeTTSException as e:
+            raise TTSError(f"edge_tts: {e}") from e
+        if not audio:
+            raise TTSError("edge_tts: no audio returned")
+        return bytes(audio)
+
+
 class FakeTTS:
     """Deterministic stand-in for tests and offline development."""
 
@@ -106,6 +148,8 @@ class FakeTTS:
 
 def get_tts() -> TTSProvider | None:
     s = get_settings()
+    if s.tts_provider == "edge":
+        return EdgeTTS(s.edge_tts_voices)
     if s.tts_provider == "google" and s.google_tts_api_key:
         return GoogleTTS(s.google_tts_api_key, s.google_tts_voices)
     if s.tts_provider == "fake":

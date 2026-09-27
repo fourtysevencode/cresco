@@ -24,7 +24,7 @@ docs/API.md         endpoint reference
 cp .env.example .env
 ```
 
-Fill in `JWT_SECRET`, `TERMINAL_MASTER_KEY` and `ANTHROPIC_API_KEY`. To run without keys, set `AI_PROVIDER=fake` and `TTS_PROVIDER=fake`.
+Fill in `JWT_SECRET`, `TERMINAL_MASTER_KEY` and `ANTHROPIC_API_KEY`. To run the tutor without a key, set `AI_PROVIDER=fake`. Read-aloud needs no key.
 
 ```bash
 docker compose up --build
@@ -99,4 +99,8 @@ For stronger protection later, NTAG 424 DNA tags generate a fresh cryptographic 
 - Requests opt into Anthropic's server-side refusal fallback, so a request declined by a safety classifier is retried automatically on a fallback model.
 - Quiz answers never reach the client before the student attempts the quiz.
 
-**Speech.** Read-aloud uses Google Cloud Text-to-Speech, which has voices for all seven languages and a free monthly quota. Each piece of text is synthesised once and cached, so replays are free. To run fully free on your own GPU, the `TTSProvider` interface in `app/services/tts.py` can take a self-hosted model such as AI4Bharat Indic Parler-TTS.
+**Speech.** Read-aloud is generated on the server as MP3, so it plays in any browser, even one with no Indian-language voices installed.
+- The default provider is **edge-tts**: Microsoft's neural voices, free and with no API key. It has natural voices for Tamil, Kannada, Telugu, Bengali, Marathi, Hindi and Indian English.
+- It is an unofficial use of Edge's public read-aloud service, so it could change without notice. That's fine for the demo; revisit before production.
+- Google Cloud TTS is still available with `TTS_PROVIDER=google`, but it needs a billing-enabled project.
+- Each piece of text is synthesised once and cached, so replays are free.

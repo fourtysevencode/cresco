@@ -3,8 +3,8 @@
     uv run python dev_server.py            # from backend/
 
 Data lives in backend/data/ (git-ignored). Demo logins and reader secrets are written to
-backend/data/demo-credentials.json on first run. Without ANTHROPIC_API_KEY / GOOGLE_TTS_API_KEY the
-tutor and read-aloud use deterministic fakes.
+backend/data/demo-credentials.json on first run. Without ANTHROPIC_API_KEY the tutor uses a
+deterministic fake. Read-aloud uses free Edge voices (no key needed).
 """
 
 import os
@@ -29,7 +29,7 @@ def main() -> None:
     env.setdefault("DATABASE_URL", f"postgresql+asyncpg://postgres@/postgres?host={socket_dir}")
     env.setdefault("STORAGE_DIR", str(DATA / "storage"))
     env.setdefault("AI_PROVIDER", "anthropic" if env.get("ANTHROPIC_API_KEY") else "fake")
-    env.setdefault("TTS_PROVIDER", "google" if env.get("GOOGLE_TTS_API_KEY") else "fake")
+    env.setdefault("TTS_PROVIDER", "edge")
 
     subprocess.run([sys.executable, "-m", "alembic", "upgrade", "head"], cwd=HERE, check=True)
 

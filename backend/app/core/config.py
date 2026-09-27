@@ -33,8 +33,10 @@ class Settings(BaseSettings):
     max_image_bytes: int = 5 * 1024 * 1024
     quiz_questions: int = 6
 
-    # Text-to-speech: "google", "fake" or "none"
-    tts_provider: str = "google"
+    # Text-to-speech: "edge" (free, no key), "google", "fake" or "none"
+    tts_provider: str = "edge"
+    # Optional JSON map of language code -> Edge voice, e.g. {"ta": "ta-IN-ValluvarNeural"} for a male voice
+    edge_tts_voices: dict[str, str] = {}
     google_tts_api_key: str = ""
     # Optional JSON map of language code -> Google voice name, e.g. {"ta": "ta-IN-Wavenet-A"}
     google_tts_voices: dict[str, str] = {}
