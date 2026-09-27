@@ -5,7 +5,11 @@
 // has set a charge on this reader in the dashboard, the tap pays; otherwise it identifies the
 // student, or reports an unregistered card (which the admin can then register from the dashboard).
 //
-// Libraries (Arduino Library Manager): "Adafruit PN532", "ArduinoJson" (v7).
+// A 1.8" 128x160 RGB TFT (ST7735, SPI) shows "Waiting" when idle, "Sending" while a tap is being
+// sent, then a green tick (or a red cross) with the result.
+//
+// Libraries (Arduino Library Manager): "Adafruit PN532", "ArduinoJson" (v7),
+// "Adafruit ST7735 and ST7789 Library", "Adafruit GFX Library".
 // Board: your ESP32 board (I2C on SDA 8 / SCL 9, as wired).
 
 #include <Arduino.h>
@@ -16,6 +20,9 @@
 #include <WiFiClientSecure.h>
 #include <Wire.h>
 #include <Adafruit_PN532.h>
+#include <Adafruit_GFX.h>
+#include <Adafruit_ST7735.h>
+#include <SPI.h>
 #include <mbedtls/md.h>
 #include <time.h>
 
@@ -26,17 +33,84 @@
 #define I2C_SDA 8
 #define I2C_SCL 9
 
+// ST7735 display (SPI). Override any of these in config.h. Set TFT_RST to -1 if RST is tied to 3V3.
+#ifndef TFT_SCK
+#define TFT_SCK 6    // display SCK / SCL / CLK
+#endif
+#ifndef TFT_MOSI
+#define TFT_MOSI 7   // display SDA / MOSI / DIN
+#endif
+#ifndef TFT_CS
+#define TFT_CS 10
+#endif
+#ifndef TFT_DC
+#define TFT_DC 3     // display DC / A0 / RS
+#endif
+#ifndef TFT_RST
+#define TFT_RST 1
+#endif
+#ifndef TFT_TAB
+#define TFT_TAB INITR_BLACKTAB  // try INITR_GREENTAB or INITR_REDTAB if colours or edges look wrong
+#endif
+
 constexpr uint32_t SAME_CARD_IGNORE_MS = 2000;  // a card resting on the reader counts as one tap
 constexpr uint32_t HEARTBEAT_MS = 60000;        // lets the dashboard show the reader as online
 constexpr uint32_t HTTP_TIMEOUT_MS = 10000;
 constexpr int HTTP_ATTEMPTS = 3;
+constexpr uint32_t RESULT_SHOW_MS = 2500;       // how long the tick / cross stays before "Waiting"
 
 Adafruit_PN532 nfc(PN532_IRQ, PN532_RESET, &Wire);
+Adafruit_ST7735 tft(&SPI, TFT_CS, TFT_DC, TFT_RST);
 Preferences prefs;
 
 String lastUid;
 uint32_t lastUidAt = 0;
 uint32_t lastHeartbeatAt = 0;
+uint32_t resultShownAt = 0;  // 0 while the display isn't showing a result
+
+// ---- Display ------------------------------------------------------------------------------------
+
+void centerText(const String &text, int16_t y, uint8_t size, uint16_t color) {
+  int16_t x1, y1;
+  uint16_t w, h;
+  tft.setTextSize(size);
+  tft.setTextColor(color);
+  tft.setTextWrap(false);
+  tft.getTextBounds(text, 0, 0, &x1, &y1, &w, &h);
+  tft.setCursor((tft.width() - (int16_t)w) / 2 - x1, y);
+  tft.print(text);
+}
+
+// A line drawn `thickness` pixels tall, for the tick and cross.
+void thickLine(int16_t x0, int16_t y0, int16_t x1, int16_t y1, int thickness, uint16_t color) {
+  for (int d = -thickness / 2; d <= thickness / 2; d++) {
+    tft.drawLine(x0, y0 + d, x1, y1 + d, color);
+  }
+}
+
+void showMessage(const String &title, const String &subtitle) {
+  tft.fillScreen(ST77XX_BLACK);
+  centerText(title, 64, 2, ST77XX_WHITE);
+  centerText(subtitle, 92, 1, 0x8410);  // grey
+  resultShownAt = 0;
+}
+
+void showWaiting() { showMessage("Waiting", "Tap a card"); }
+
+void showResult(bool ok, const String &caption) {
+  const int16_t cx = 64, cy = 64, r = 42;
+  tft.fillScreen(ST77XX_BLACK);
+  tft.fillCircle(cx, cy, r, ok ? ST77XX_GREEN : ST77XX_RED);
+  if (ok) {
+    thickLine(cx - 22, cy + 2, cx - 7, cy + 17, 7, ST77XX_WHITE);
+    thickLine(cx - 7, cy + 17, cx + 23, cy - 15, 7, ST77XX_WHITE);
+  } else {
+    thickLine(cx - 18, cy - 18, cx + 18, cy + 18, 7, ST77XX_WHITE);
+    thickLine(cx - 18, cy + 18, cx + 18, cy - 18, 7, ST77XX_WHITE);
+  }
+  centerText(caption.substring(0, 21), 124, 1, ST77XX_WHITE);  // 21 chars fit across at size 1
+  resultShownAt = millis() | 1;  // never 0, which means "no result showing"
+}
 
 // ---- Feedback -----------------------------------------------------------------------------------
 
@@ -44,7 +118,8 @@ void setPin(int pin, bool on) {
   if (pin >= 0) digitalWrite(pin, on ? HIGH : LOW);
 }
 
-void signal(bool ok) {
+void signal(bool ok, const String &caption) {
+  showResult(ok, caption);
   int led = ok ? PIN_LED_OK : PIN_LED_ERROR;
   int beeps = ok ? 1 : 3;
   for (int i = 0; i < beeps; i++) {
@@ -192,7 +267,7 @@ void sendScan(const String &uid) {
   JsonDocument res;
   int code = signedPost("scan", body, res);
   if (code != 200) {
-    signal(false);
+    signal(false, code > 0 ? "Server error" : "No connection");
     return;
   }
   String result = res["result"] | "";
@@ -200,16 +275,16 @@ void sendScan(const String &uid) {
   if (result == "approved") {
     if (!res["reward"].isNull()) Serial.printf("REWARD for %s: %s\n", name.c_str(), (const char *)res["reward"]);
     else Serial.printf("PAID %s by %s, balance %s\n", rupees(res["amount_paise"] | 0L).c_str(), name.c_str(), rupees(res["balance_paise"] | 0L).c_str());
-    signal(true);
+    signal(true, name);
   } else if (result == "identified") {
     Serial.printf("Hello %s, balance %s\n", name.c_str(), rupees(res["balance_paise"] | 0L).c_str());
-    signal(true);
+    signal(true, name);
   } else if (result == "declined") {
     Serial.printf("DECLINED %s: %s\n", name.c_str(), (const char *)(res["reason"] | ""));
-    signal(false);
+    signal(false, "Declined");
   } else {
     Serial.printf("Unregistered card %s: register it in the dashboard\n", uid.c_str());
-    signal(false);
+    signal(false, "Unregistered card");
   }
 }
 
@@ -221,10 +296,16 @@ void setup() {
     if (pin >= 0) pinMode(pin, OUTPUT);
   }
 
+  SPI.begin(TFT_SCK, -1, TFT_MOSI, TFT_CS);
+  tft.initR(TFT_TAB);
+  tft.setRotation(0);  // portrait, 128 wide x 160 tall
+  showMessage("Starting", "Connecting...");
+
   Wire.begin(I2C_SDA, I2C_SCL);
   nfc.begin();
   if (!nfc.getFirmwareVersion()) {
     Serial.println("PN532 not found. Check wiring and I2C mode.");
+    showMessage("Error", "NFC reader not found");
     while (true) delay(10);
   }
   nfc.SAMConfig();
@@ -234,9 +315,11 @@ void setup() {
   syncClock();
   heartbeat();
   Serial.println("Tap an NFC card...");
+  showWaiting();
 }
 
 void loop() {
+  if (resultShownAt && millis() - resultShownAt > RESULT_SHOW_MS) showWaiting();
   if (millis() - lastHeartbeatAt > HEARTBEAT_MS) heartbeat();
 
   uint8_t uid[10];
@@ -252,5 +335,6 @@ void loop() {
   lastUid = hex;
   lastUidAt = millis();
   Serial.printf("UID: %s\n", hex.c_str());
+  showMessage("Sending", "Please wait...");
   sendScan(hex);
 }

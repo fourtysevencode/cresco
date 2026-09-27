@@ -1,0 +1,28 @@
+// Copy to config.h (git-ignored) and fill in. TERMINAL_ID and TERMINAL_SECRET come from the
+// dashboard (Admin → Readers → Add reader) or from `python -m app.cli seed-demo`.
+#pragma once
+
+#define WIFI_SSID "school-wifi"
+#define WIFI_PASSWORD "wifi-password"
+
+// No trailing slash. e.g. "https://cresco-api.vercel.app", or "http://192.168.1.10:8000" for a
+// server on your laptop (same WiFi).
+#define API_BASE "https://cresco-api.vercel.app"
+
+#define TERMINAL_ID "00000000-0000-0000-0000-000000000000"
+#define TERMINAL_SECRET "paste-the-64-hex-char-secret-here"
+
+// Optional feedback. Set to -1 if not connected.
+#define PIN_LED_OK -1      // lights on approved / identified
+#define PIN_LED_ERROR -1   // lights on declined / unknown / network error
+#define PIN_BUZZER -1      // active buzzer
+
+// ST7735 display (1.8" 128x160 TFT, SPI). These match the defaults in cresco_pn523.ino; change them
+// only if you wired the display differently. Set TFT_RST to -1 if RST is tied to 3V3.
+#define TFT_SCK 6    // display SCK / SCL / CLK
+#define TFT_MOSI 7   // display SDA / MOSI / DIN
+#define TFT_CS 10
+#define TFT_DC 3     // display DC / A0 / RS
+#define TFT_RST 1
+// If colours are swapped or one edge shows noise, try INITR_GREENTAB or INITR_REDTAB.
+#define TFT_TAB INITR_BLACKTAB
