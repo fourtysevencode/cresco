@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import get_settings
 from app.core.deps import CurrentUser, SessionDep, StudentUser, ensure_can_view_student
 from app.models import Lesson, LessonMessage, Quiz, Student, User
-from app.schemas.learning import AskIn, LessonOut, LessonSummary, MessageOut, QuestionOut, QuizOut
+from app.schemas.learning import AskIn, LessonOut, LessonSummary, MessageOut, QuestionOut, QuizOut, TextLessonIn
 from app.services import tts as tts_service
 from app.services.ai_tutor import LessonContext, PageImage, TutorError, get_tutor
 from app.services.languages import LanguageCode
@@ -40,7 +40,8 @@ def _sniff(data: bytes) -> tuple[str, str] | None:
 
 def _tutor_http_error(e: TutorError) -> HTTPException:
     code = status.HTTP_503_SERVICE_UNAVAILABLE if e.code in ("ai_busy", "ai_unavailable") else status.HTTP_502_BAD_GATEWAY
-    return HTTPException(code, e.code)
+    # Include which models failed and why (e.g. "gemini-3.8-flash: 429 RESOURCE_EXHAUSTED") to aid diagnosis.
+    return HTTPException(code, {"code": e.code, "details": e.details} if e.details else e.code)
 
 
 def _context(lesson: Lesson) -> LessonContext:
@@ -142,6 +143,49 @@ async def create_lesson(
         title=content.title[:300],
         subject=content.subject[:100],
         extracted_text=content.extracted_text,
+        explanation={
+            "summary": content.summary,
+            "sections": [sec.model_dump() for sec in content.sections],
+            "key_terms": [t.model_dump() for t in content.key_terms],
+        },
+    )
+    session.add(lesson)
+    await session.commit()
+    return await _lesson_out(session, lesson)
+
+
+@router.post("/lessons/text", response_model=LessonOut, status_code=201)
+async def create_lesson_from_text(body: TextLessonIn, student: StudentUser, session: SessionDep, response: Response):
+    """Explain textbook text the student's device already read from the page (OCR). Much lighter than
+    sending photos: the AI only has to explain, not read the page."""
+    language = body.language or student.preferred_language or "ta"
+    text = body.text.strip()
+    content_hash = hashlib.sha256(f"text|{language}|{text}".encode()).hexdigest()
+    existing = (
+        await session.execute(select(Lesson).where(Lesson.student_id == student.id, Lesson.content_hash == content_hash))
+    ).scalar_one_or_none()
+    if existing:
+        response.status_code = status.HTTP_200_OK
+        return await _lesson_out(session, existing, deduplicated=True)
+
+    grade = await session.scalar(select(Student.grade).where(Student.user_id == student.id))
+    await session.commit()  # release the DB connection during the (slow) AI call
+    try:
+        content = await get_tutor().explain_text(text, language, grade, body.subject)
+    except TutorError as e:
+        raise _tutor_http_error(e)
+    if not content.readable:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, {"code": "unreadable_text", "tip": content.summary})
+
+    lesson = Lesson(
+        student_id=student.id,
+        language=language,
+        grade=grade,
+        content_hash=content_hash,
+        image_keys=[],
+        title=content.title[:300],
+        subject=content.subject[:100],
+        extracted_text=text,
         explanation={
             "summary": content.summary,
             "sections": [sec.model_dump() for sec in content.sections],

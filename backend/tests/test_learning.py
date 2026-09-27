@@ -154,3 +154,40 @@ async def test_expired_reward_not_redeemable(client, world):
     await world.set_pending(client, world.canteen, kind="redeem")
     assert (await world.canteen.scan(client, st["uid"])).json()["reason"] == "no_reward"
     assert (await client.get("/v1/students/me/rewards", headers=st["headers"])).json()[0]["status"] == "expired"
+
+
+PAGE_TEXT = (
+    "Chapter 4: Force and Motion\n"
+    "A force is a push or a pull on an object. Forces can make a still object move, stop a moving object, "
+    "or change its direction or speed. Friction slows moving objects down."
+)
+
+
+async def test_lesson_from_ocr_text(client, world):
+    st = world.students[0]
+    r = await client.post("/v1/lessons/text", json={"text": PAGE_TEXT, "language": "bn", "subject": "Physics"}, headers=st["headers"])
+    assert r.status_code == 201
+    lesson = r.json()
+    assert lesson["title"] == "Chapter 4: Force and Motion" and lesson["language"] == "bn"
+    assert lesson["extracted_text"] == PAGE_TEXT  # kept for follow-up questions and quizzes
+    again = await client.post("/v1/lessons/text", json={"text": PAGE_TEXT, "language": "bn"}, headers=st["headers"])
+    assert again.status_code == 200 and again.json()["deduplicated"]
+    quiz = await client.post(f"/v1/lessons/{lesson['id']}/quiz", headers=st["headers"])
+    assert quiz.status_code == 201
+
+    garbled = await client.post("/v1/lessons/text", json={"text": "@@ ## ~~ %% ^^ && ** !!"}, headers=st["headers"])
+    assert garbled.status_code == 422 and garbled.json()["detail"]["code"] == "unreadable_text"
+    assert (await client.post("/v1/lessons/text", json={"text": "too short"}, headers=st["headers"])).status_code == 422
+    assert (await client.post("/v1/lessons/text", json={"text": PAGE_TEXT}, headers=world.parent["headers"])).status_code == 403
+
+
+async def test_tutor_failure_details_are_returned(client, world, monkeypatch):
+    from app.services import ai_tutor
+
+    async def busy(*a, **k):
+        raise ai_tutor.TutorError("ai_busy", ["gemini-3.8-flash: 429 RESOURCE_EXHAUSTED"])
+
+    monkeypatch.setattr(ai_tutor.FakeTutor, "explain_text", busy)
+    r = await client.post("/v1/lessons/text", json={"text": PAGE_TEXT}, headers=world.students[0]["headers"])
+    assert r.status_code == 503
+    assert r.json()["detail"] == {"code": "ai_busy", "details": ["gemini-3.8-flash: 429 RESOURCE_EXHAUSTED"]}
