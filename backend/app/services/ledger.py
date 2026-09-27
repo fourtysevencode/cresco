@@ -57,39 +57,33 @@ async def charge(
     session: AsyncSession,
     terminal: Terminal,
     merchant: Merchant,
-    card_token: str,
-    tag_uid: str | None,
+    card: NfcCard,
+    student: User,
     amount_paise: int,
     idempotency_key: str,
 ) -> ChargeResult:
-    """Debit a student's wallet for a purchase at a terminal. Commits the session."""
+    """Debit a student's wallet for a purchase at a terminal. Commits the session on approval and
+    rolls it back on decline (so a caller's pending changes only persist if the charge succeeds)."""
     key = f"{terminal.id}:{idempotency_key}"
-    replay = await _replayed_charge(session, key, card_token, amount_paise)
-    if replay:
-        return replay
-
-    card = (await session.execute(select(NfcCard).where(NfcCard.card_token == card_token))).scalar_one_or_none()
-    if card is None:
-        return ChargeResult("declined", "unknown_card")
-    student = await session.get(User, card.student_id)
-    assert student is not None
     first_name = student.first_name  # read now: objects expire on rollback
 
-    def declined(reason: str) -> ChargeResult:
-        return ChargeResult("declined", reason, first_name)
+    def declined(reason: str, balance: int | None = None) -> ChargeResult:
+        return ChargeResult("declined", reason, first_name, balance)
 
+    replay = await _replayed_charge(session, key, card.id, amount_paise, first_name)
+    if replay:
+        return replay
     if card.status != "active":
+        await session.rollback()
         return declined("card_blocked")
-    normalized_uid = tag_uid.upper().replace(":", "") if tag_uid else None
-    if card.tag_uid and normalized_uid != card.tag_uid:
-        return declined("tag_mismatch")
     if student.school_id != merchant.school_id:
+        await session.rollback()
         return declined("wrong_school")
 
     wallet = await _lock_wallet(session, student_id=student.id)
     assert wallet is not None
     # A concurrent retry with the same key may have committed while we waited for the lock.
-    replay = await _replayed_charge(session, key, card_token, amount_paise)
+    replay = await _replayed_charge(session, key, card.id, amount_paise, first_name)
     if replay:
         await session.rollback()
         return replay
@@ -102,16 +96,14 @@ async def charge(
             )
         )
     )
+    balance = wallet.balance_paise
     if spent_today + amount_paise > card.daily_limit_paise:
         await session.rollback()
-        return declined("daily_limit")
-    if wallet.balance_paise < amount_paise:
-        balance = wallet.balance_paise
+        return declined("daily_limit", balance)
+    if balance < amount_paise:
         await session.rollback()
-        return ChargeResult("declined", "insufficient_balance", first_name, balance)
+        return declined("insufficient_balance", balance)
 
-    if card.tag_uid is None and normalized_uid:
-        card.tag_uid = normalized_uid  # bind the tag's hardware UID on first use
     try:
         entry = await _append(
             session,
@@ -128,22 +120,22 @@ async def charge(
     except IntegrityError:
         # Lost a race with a concurrent retry carrying the same idempotency key.
         await session.rollback()
-        replay = await _replayed_charge(session, key, card_token, amount_paise)
+        replay = await _replayed_charge(session, key, card.id, amount_paise, first_name)
         if replay:
             return replay
         raise
     return ChargeResult("approved", None, first_name, entry.balance_after_paise, entry.id)
 
 
-async def _replayed_charge(session: AsyncSession, key: str, card_token: str, amount_paise: int) -> ChargeResult | None:
+async def _replayed_charge(
+    session: AsyncSession, key: str, card_id: uuid.UUID, amount_paise: int, first_name: str
+) -> ChargeResult | None:
     entry = (await session.execute(select(LedgerEntry).where(LedgerEntry.idempotency_key == key))).scalar_one_or_none()
     if entry is None:
         return None
-    card = await session.get(NfcCard, entry.card_id)
-    if card is None or card.card_token != card_token or -entry.amount_paise != amount_paise:
+    if entry.card_id != card_id or -entry.amount_paise != amount_paise:
         return ChargeResult("declined", "idempotency_conflict")
-    student = await session.get(User, card.student_id)
-    return ChargeResult("approved", None, student.first_name if student else None, entry.balance_after_paise, entry.id)
+    return ChargeResult("approved", None, first_name, entry.balance_after_paise, entry.id)
 
 
 async def credit_topup(

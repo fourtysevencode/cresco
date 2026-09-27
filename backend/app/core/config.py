@@ -29,6 +29,8 @@ class Settings(BaseSettings):
 
     # Wallet
     default_daily_limit_paise: int = 50_000  # ₹500
+    # How long a charge/redeem set on the dashboard waits for a tap before it lapses.
+    pending_action_seconds: int = 120
     # Top-ups are mocked (instant credit, no payment gateway).
     min_topup_paise: int = 100  # ₹1
     max_topup_paise: int = 500_000  # ₹5,000

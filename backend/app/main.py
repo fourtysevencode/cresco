@@ -1,8 +1,9 @@
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import APIRouter, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import RedirectResponse
+from fastapi.responses import FileResponse, RedirectResponse
 
 from app.api.v1 import admin, auth, cron, leaderboard, lessons, merchant, quizzes, terminal, wallets
 from app.core.config import get_settings
@@ -44,9 +45,17 @@ for module in (auth, admin, wallets, terminal, merchant, lessons, quizzes, leade
 app.include_router(v1)
 
 
+DASHBOARD = Path(__file__).parent / "static" / "dashboard.html"
+
+
 @app.get("/", include_in_schema=False)
 async def root():
-    return RedirectResponse("/docs")
+    return RedirectResponse("/dashboard")
+
+
+@app.get("/dashboard", include_in_schema=False)
+async def dashboard():
+    return FileResponse(DASHBOARD, headers={"Cache-Control": "no-cache"})
 
 
 @app.get("/health", tags=["meta"])

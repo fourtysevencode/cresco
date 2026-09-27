@@ -1,0 +1,579 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Cresco Dashboard</title>
+<style>
+  :root {
+    --bg: #f6f7f9; --surface: #ffffff; --surface-2: #f0f2f5; --text: #15181d; --muted: #5d6673;
+    --border: #dfe3e8; --accent: #1f6feb; --accent-text: #ffffff;
+    --ok: #137333; --ok-bg: #e6f4ea; --bad: #b3261e; --bad-bg: #fce8e6; --warn: #8a5a00; --warn-bg: #fef3d6;
+    --radius: 10px; --shadow: 0 1px 2px rgba(0,0,0,.06), 0 1px 8px rgba(0,0,0,.04);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0f1216; --surface: #171b21; --surface-2: #1f242c; --text: #e7eaee; --muted: #9aa4b2;
+      --border: #2b323c; --accent: #4c8dff; --accent-text: #0b0d10;
+      --ok: #7fd49a; --ok-bg: #16301f; --bad: #ff8a80; --bad-bg: #3a1a18; --warn: #f5c451; --warn-bg: #3a2e12;
+      --shadow: none;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  header { display: flex; align-items: center; gap: 16px; padding: 12px 20px; background: var(--surface); border-bottom: 1px solid var(--border); position: sticky; top: 0; z-index: 5; }
+  header h1 { font-size: 18px; margin: 0; letter-spacing: .2px; }
+  header .who { margin-left: auto; color: var(--muted); font-size: 14px; }
+  nav { display: flex; gap: 4px; padding: 10px 20px 0; flex-wrap: wrap; }
+  nav button { background: none; border: 0; padding: 8px 12px; border-radius: 8px 8px 0 0; color: var(--muted); font: inherit; cursor: pointer; border-bottom: 2px solid transparent; }
+  nav button.active { color: var(--text); border-bottom-color: var(--accent); font-weight: 600; }
+  main { max-width: 1100px; margin: 0 auto; padding: 16px 20px 60px; }
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 18px; box-shadow: var(--shadow); margin-bottom: 16px; }
+  .card h2 { font-size: 16px; margin: 0 0 12px; }
+  .grid { display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); }
+  label { display: block; font-size: 13px; color: var(--muted); margin: 10px 0 4px; }
+  input, select { width: 100%; padding: 9px 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface-2); color: var(--text); font: inherit; }
+  input:focus, select:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+  button.btn { padding: 9px 14px; border-radius: 8px; border: 1px solid var(--border); background: var(--surface-2); color: var(--text); font: inherit; cursor: pointer; }
+  button.btn.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-text); font-weight: 600; }
+  button.btn.danger { color: var(--bad); }
+  button.btn:disabled { opacity: .5; cursor: default; }
+  .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .row > * { flex: 0 0 auto; }
+  .muted { color: var(--muted); }
+  .small { font-size: 13px; }
+  .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px; }
+  table { width: 100%; border-collapse: collapse; }
+  th, td { text-align: left; padding: 8px 6px; border-bottom: 1px solid var(--border); vertical-align: middle; }
+  th { font-size: 12px; text-transform: uppercase; letter-spacing: .4px; color: var(--muted); font-weight: 600; }
+  td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+  .pill { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 12px; font-weight: 600; background: var(--surface-2); color: var(--muted); }
+  .pill.ok { background: var(--ok-bg); color: var(--ok); } .pill.bad { background: var(--bad-bg); color: var(--bad); } .pill.warn { background: var(--warn-bg); color: var(--warn); }
+  .msg { padding: 10px 12px; border-radius: 8px; margin-top: 12px; font-size: 14px; }
+  .msg.ok { background: var(--ok-bg); color: var(--ok); } .msg.bad { background: var(--bad-bg); color: var(--bad); }
+  .hidden { display: none !important; }
+  .big-status { border-radius: var(--radius); padding: 22px; text-align: center; background: var(--surface-2); min-height: 150px; display: flex; flex-direction: column; justify-content: center; gap: 6px; }
+  .big-status .title { font-size: 26px; font-weight: 700; }
+  .big-status.ok { background: var(--ok-bg); color: var(--ok); } .big-status.bad { background: var(--bad-bg); color: var(--bad); } .big-status.wait { background: var(--warn-bg); color: var(--warn); }
+  .amount { font-size: 28px; font-weight: 700; text-align: right; font-variant-numeric: tabular-nums; }
+  .quick { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-top: 10px; }
+  .money { font-size: 30px; font-weight: 700; font-variant-numeric: tabular-nums; }
+  .detect { border: 2px dashed var(--border); border-radius: var(--radius); padding: 14px; text-align: center; }
+  .detect.found { border-color: var(--ok); background: var(--ok-bg); color: var(--ok); }
+  .secret { background: var(--surface-2); border-radius: 8px; padding: 10px; word-break: break-all; }
+  #login { max-width: 380px; margin: 10vh auto; }
+  footer { text-align: center; padding: 20px; font-size: 13px; }
+  footer a { color: var(--muted); }
+  @media (max-width: 600px) { main { padding: 12px; } header { padding: 10px 12px; } nav { padding: 8px 12px 0; } th:nth-child(n+5), td:nth-child(n+5) { display: none; } }
+</style>
+</head>
+<body>
+
+<div id="login" class="card">
+  <h2>Cresco</h2>
+  <p class="muted small">Sign in with your school email or phone.</p>
+  <form id="login-form">
+    <label for="login-id">Email or phone</label>
+    <input id="login-id" autocomplete="username" required>
+    <label for="login-pw">Password</label>
+    <input id="login-pw" type="password" autocomplete="current-password" required>
+    <div class="row" style="margin-top:14px"><button class="btn primary" type="submit">Sign in</button></div>
+    <div id="login-msg" class="msg bad hidden"></div>
+  </form>
+</div>
+
+<div id="app" class="hidden">
+  <header>
+    <h1>Cresco</h1>
+    <span class="who" id="who"></span>
+    <button class="btn" id="logout">Sign out</button>
+  </header>
+  <nav id="tabs"></nav>
+  <main id="view"></main>
+  <footer><a href="/docs">API docs</a></footer>
+</div>
+
+<!-- ======================= Views (cloned into <main>) ======================= -->
+
+<template id="t-counter">
+  <div class="grid">
+    <div class="card">
+      <h2>Charge</h2>
+      <label for="c-reader">Reader</label>
+      <select id="c-reader"></select>
+      <label for="c-amount">Amount (₹)</label>
+      <input id="c-amount" class="amount" inputmode="decimal" placeholder="0" autocomplete="off">
+      <div class="quick">
+        <button class="btn" data-add="10">+10</button><button class="btn" data-add="20">+20</button>
+        <button class="btn" data-add="50">+50</button><button class="btn" data-add="100">+100</button>
+      </div>
+      <div class="row" style="margin-top:14px">
+        <button class="btn primary" id="c-charge">Charge &amp; wait for tap</button>
+        <button class="btn" id="c-redeem">Redeem a prize</button>
+        <button class="btn danger hidden" id="c-cancel">Cancel</button>
+      </div>
+    </div>
+    <div class="card">
+      <h2>Reader</h2>
+      <div id="c-status" class="big-status"><div class="title">Ready</div><div class="muted">Set an amount, then ask the student to tap.</div></div>
+      <p class="small muted" id="c-reader-info"></p>
+    </div>
+  </div>
+  <div class="card" id="c-sales-card">
+    <div class="row"><h2 style="margin:0">Today's sales</h2><span class="muted small" id="c-sales-total"></span></div>
+    <table><thead><tr><th>Time</th><th>Student</th><th class="num">Amount</th><th></th></tr></thead><tbody id="c-sales"></tbody></table>
+  </div>
+</template>
+
+<template id="t-students">
+  <div class="card">
+    <div class="row" style="justify-content:space-between">
+      <h2 style="margin:0">Students</h2>
+      <input id="s-search" placeholder="Search name or card…" style="max-width:260px">
+    </div>
+    <table>
+      <thead><tr><th>Name</th><th>Grade</th><th>Card serial</th><th>Card</th><th class="num">Balance</th><th></th></tr></thead>
+      <tbody id="s-rows"></tbody>
+    </table>
+    <div id="s-msg" class="msg hidden"></div>
+  </div>
+</template>
+
+<template id="t-register">
+  <div class="grid">
+    <div class="card">
+      <h2>Register a student</h2>
+      <div id="r-detect" class="detect"><strong>Tap the new card on any reader</strong><div class="small muted">Its serial number will appear here.</div></div>
+      <form id="r-form">
+        <label for="r-uid">Card serial number</label>
+        <input id="r-uid" class="mono" placeholder="04:A1:B2:C3:D4:E5:F6">
+        <label for="r-name">Full name</label>
+        <input id="r-name" required>
+        <div class="row" style="gap:12px">
+          <div style="flex:1"><label for="r-grade">Grade</label><input id="r-grade" type="number" min="1" max="12" value="7" required></div>
+          <div style="flex:1"><label for="r-lang">Language</label>
+            <select id="r-lang"><option value="ta">Tamil</option><option value="kn">Kannada</option><option value="te">Telugu</option><option value="bn">Bengali</option><option value="mr">Marathi</option><option value="hi">Hindi</option><option value="en">English</option></select></div>
+        </div>
+        <label for="r-limit">Daily spend limit (₹)</label>
+        <input id="r-limit" type="number" min="0" value="500">
+        <details style="margin-top:10px"><summary class="small muted">Tutor login (optional)</summary>
+          <label for="r-email">Email or phone</label><input id="r-email">
+          <label for="r-pw">Password (6+ characters)</label><input id="r-pw" type="password" autocomplete="new-password">
+        </details>
+        <div class="row" style="margin-top:14px"><button class="btn primary" type="submit">Create student</button></div>
+        <div id="r-msg" class="msg hidden"></div>
+      </form>
+    </div>
+    <div class="card">
+      <h2>Add a parent</h2>
+      <form id="p-form">
+        <label for="p-name">Name</label><input id="p-name" required>
+        <label for="p-login">Email or phone</label><input id="p-login" required>
+        <label for="p-pw">Password (6+ characters)</label><input id="p-pw" type="password" autocomplete="new-password" required>
+        <label for="p-child">Child</label><select id="p-child"></select>
+        <div class="row" style="margin-top:14px"><button class="btn primary" type="submit">Create parent</button></div>
+        <div id="p-msg" class="msg hidden"></div>
+      </form>
+    </div>
+  </div>
+</template>
+
+<template id="t-readers">
+  <div class="card">
+    <h2>Readers</h2>
+    <table><thead><tr><th>Reader</th><th>Shop</th><th>Status</th><th>Terminal ID</th></tr></thead><tbody id="rd-rows"></tbody></table>
+  </div>
+  <div class="grid">
+    <div class="card">
+      <h2>Add reader</h2>
+      <form id="rd-form">
+        <label for="rd-shop">Shop</label><select id="rd-shop" required></select>
+        <label for="rd-name">Reader name</label><input id="rd-name" placeholder="Canteen counter 1" required>
+        <div class="row" style="margin-top:14px"><button class="btn primary" type="submit">Add reader</button></div>
+      </form>
+      <div id="rd-secret" class="hidden">
+        <div class="msg ok">Reader added. Copy these into <span class="mono">config.h</span> now; the secret isn't shown again.</div>
+        <pre class="secret mono" id="rd-config"></pre>
+        <button class="btn" id="rd-copy">Copy</button>
+      </div>
+    </div>
+    <div class="card">
+      <h2>Add shop</h2>
+      <form id="sh-form">
+        <label for="sh-name">Name</label><input id="sh-name" placeholder="School Canteen" required>
+        <label for="sh-kind">Kind</label><select id="sh-kind"><option value="canteen">Canteen</option><option value="bookstore">Bookstore</option></select>
+        <div class="row" style="margin-top:14px"><button class="btn primary" type="submit">Add shop</button></div>
+        <div id="sh-msg" class="msg hidden"></div>
+      </form>
+    </div>
+  </div>
+</template>
+
+<template id="t-taps">
+  <div class="card">
+    <h2>Recent taps</h2>
+    <table><thead><tr><th>Time</th><th>Reader</th><th>Card serial</th><th>Student</th><th>Result</th></tr></thead><tbody id="tp-rows"></tbody></table>
+  </div>
+</template>
+
+<template id="t-parent">
+  <div id="pa-children"></div>
+</template>
+
+<template id="t-student">
+  <div class="grid">
+    <div class="card"><h2>My wallet</h2><div class="money" id="st-balance">—</div><div class="small muted" id="st-card"></div></div>
+    <div class="card"><h2>My points this week</h2><div class="money" id="st-points">—</div><div class="small muted" id="st-rank"></div></div>
+  </div>
+  <div class="card"><h2>Recent</h2><table><tbody id="st-txns"></tbody></table></div>
+</template>
+
+<script>
+"use strict";
+// ---------------------------------------------------------------- basics
+const $ = (sel, root = document) => root.querySelector(sel);
+const inr = new Intl.NumberFormat("en-IN", { style: "currency", currency: "INR" });
+const money = (paise) => (paise == null ? "—" : inr.format(paise / 100));
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
+const fmtUid = (uid) => (uid || "").match(/.{1,2}/g)?.join(":") ?? "";
+const time = (iso) => new Date(iso).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+const ago = (iso) => { const s = Math.max(0, Math.round((Date.now() - new Date(iso)) / 1000)); return s < 60 ? `${s}s ago` : s < 3600 ? `${Math.round(s / 60)} min ago` : time(iso); };
+const REASONS = {
+  insufficient_balance: "Not enough balance", daily_limit: "Daily limit reached", card_blocked: "Card is blocked",
+  unregistered_card: "Card isn't registered", wrong_school: "Card is from another school", no_reward: "No prize to redeem",
+  idempotency_conflict: "Duplicate tap",
+};
+const reasonText = (r) => REASONS[r] || r || "";
+
+function show(el, text, ok) {
+  el.textContent = text; el.classList.remove("hidden", "ok", "bad"); el.classList.add(ok ? "ok" : "bad");
+}
+function errText(e) {
+  const d = e.detail;
+  if (Array.isArray(d)) return d.map((x) => x.msg.replace(/^Value error, /, "")).join("; ");
+  if (d && typeof d === "object") return d.code === "card_in_use" ? `That card already belongs to ${d.student_name}.` : JSON.stringify(d);
+  return { account_exists: "That email or phone is already used.", invalid_credentials: "Wrong email/phone or password." }[d] || d || "Something went wrong";
+}
+
+// ---------------------------------------------------------------- auth + API
+let tokens = null, me = null;
+try { tokens = JSON.parse(localStorage.getItem("cresco.tokens")); } catch {}
+
+async function api(path, { method = "GET", body } = {}, retried = false) {
+  const res = await fetch(`/v1${path}`, {
+    method,
+    headers: { ...(body ? { "Content-Type": "application/json" } : {}), ...(tokens ? { Authorization: `Bearer ${tokens.access_token}` } : {}) },
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  if (res.status === 401 && tokens && !retried && path !== "/auth/refresh") {
+    const r = await fetch("/v1/auth/refresh", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ refresh_token: tokens.refresh_token }) });
+    if (r.ok) { saveTokens(await r.json()); return api(path, { method, body }, true); }
+    logout(); throw { detail: "Session expired" };
+  }
+  const data = res.status === 204 ? null : await res.json().catch(() => null);
+  if (!res.ok) throw data || { detail: `HTTP ${res.status}` };
+  return data;
+}
+function saveTokens(t) { tokens = t; try { localStorage.setItem("cresco.tokens", JSON.stringify(t)); } catch {} }
+function logout() { tokens = null; me = null; try { localStorage.removeItem("cresco.tokens"); } catch {} stopTimers(); $("#app").classList.add("hidden"); $("#login").classList.remove("hidden"); }
+
+$("#login-form").addEventListener("submit", async (ev) => {
+  ev.preventDefault();
+  try {
+    saveTokens(await api("/auth/login", { method: "POST", body: { login: $("#login-id").value, password: $("#login-pw").value } }));
+    await start();
+  } catch (e) { show($("#login-msg"), errText(e), false); }
+});
+$("#logout").addEventListener("click", logout);
+
+// ---------------------------------------------------------------- navigation
+const TABS = {
+  admin: [["counter", "Counter"], ["students", "Students"], ["register", "Register"], ["readers", "Readers"], ["taps", "Taps"]],
+  merchant_staff: [["counter", "Counter"]],
+  parent: [["parent", "My children"]],
+  student: [["student", "Me"]],
+};
+let timers = [];
+function stopTimers() { timers.forEach(clearInterval); timers = []; }
+function every(ms, fn) { fn(); timers.push(setInterval(fn, ms)); }
+
+async function start() {
+  me = await api("/auth/me");
+  $("#login").classList.add("hidden"); $("#app").classList.remove("hidden");
+  $("#who").textContent = `${me.name} · ${me.role.replace("_", " ")}`;
+  const tabs = TABS[me.role] || [];
+  $("#tabs").innerHTML = tabs.length > 1 ? tabs.map(([id, label]) => `<button data-tab="${id}">${label}</button>`).join("") : "";
+  $("#tabs").querySelectorAll("button").forEach((b) => b.addEventListener("click", () => open(b.dataset.tab)));
+  open(tabs[0][0]);
+}
+
+function open(tab) {
+  stopTimers();
+  $("#tabs").querySelectorAll("button").forEach((b) => b.classList.toggle("active", b.dataset.tab === tab));
+  const view = $("#view");
+  view.replaceChildren($(`#t-${tab}`).content.cloneNode(true));
+  ({ counter, students, register, readers, taps, parent, student })[tab](view);
+}
+
+// ---------------------------------------------------------------- counter (cashier)
+async function counter(view) {
+  const readers = await api("/merchant/terminals");
+  const sel = $("#c-reader", view);
+  sel.innerHTML = readers.map((r) => `<option value="${r.id}">${esc(r.name)} — ${esc(r.merchant_name)}</option>`).join("") || "<option>No readers yet</option>";
+  try { const saved = localStorage.getItem("cresco.reader"); if (readers.some((r) => r.id === saved)) sel.value = saved; } catch {}
+  sel.addEventListener("change", () => { try { localStorage.setItem("cresco.reader", sel.value); } catch {} lastSeenScan = null; });
+
+  const amount = $("#c-amount", view);
+  view.querySelectorAll("[data-add]").forEach((b) => b.addEventListener("click", () => {
+    amount.value = String((parseFloat(amount.value) || 0) + Number(b.dataset.add));
+  }));
+
+  const status = $("#c-status", view);
+  const setStatus = (cls, title, sub) => { status.className = `big-status ${cls}`; status.innerHTML = `<div class="title">${esc(title)}</div><div>${esc(sub || "")}</div>`; };
+  let waiting = null;   // {kind, amount_paise} while a pending action is open
+  let lastSeenScan = null;
+
+  async function setPending(body) {
+    try {
+      await api(`/merchant/terminals/${sel.value}/pending`, { method: "POST", body });
+      waiting = body;
+      $("#c-cancel", view).classList.remove("hidden");
+      setStatus("wait", body.kind === "charge" ? `Tap card to pay ${money(body.amount_paise)}` : "Tap card to redeem a prize", "Waiting for the student's card…");
+    } catch (e) { setStatus("bad", "Couldn't start", errText(e)); }
+  }
+  $("#c-charge", view).addEventListener("click", () => {
+    const paise = Math.round((parseFloat(amount.value) || 0) * 100);
+    if (paise <= 0) { setStatus("bad", "Enter an amount", ""); amount.focus(); return; }
+    setPending({ kind: "charge", amount_paise: paise });
+  });
+  $("#c-redeem", view).addEventListener("click", () => setPending({ kind: "redeem" }));
+  $("#c-cancel", view).addEventListener("click", async () => {
+    await api(`/merchant/terminals/${sel.value}/pending`, { method: "DELETE" }).catch(() => {});
+    waiting = null; $("#c-cancel", view).classList.add("hidden"); setStatus("", "Cancelled", "");
+  });
+
+  async function poll() {
+    if (!sel.value || !readers.length) return;
+    let s;
+    try { s = await api(`/merchant/terminals/${sel.value}/status`); } catch { return; }
+    const online = s.last_seen_at && Date.now() - new Date(s.last_seen_at) < 3 * 60 * 1000;
+    $("#c-reader-info", view).textContent = s.last_seen_at ? `Reader ${online ? "online" : "offline"} · last seen ${ago(s.last_seen_at)}` : "Reader has never connected";
+    const fresh = s.last_scan_at && s.last_scan_at !== lastSeenScan;
+    if (lastSeenScan === null) { lastSeenScan = s.last_scan_at || ""; return; }  // don't replay old taps on load
+    if (fresh) {
+      lastSeenScan = s.last_scan_at;
+      const r = s.last_scan;
+      if (r.result === "approved") {
+        setStatus("ok", r.reward ? `Give: ${r.reward}` : `Paid ${money(r.amount_paise)}`, r.reward ? r.name : `${r.name} · balance ${money(r.balance_paise)}`);
+        amount.value = ""; loadSales();
+      } else if (r.result === "declined") {
+        setStatus("bad", reasonText(r.reason), `${r.name || ""}${r.balance_paise != null ? ` · balance ${money(r.balance_paise)}` : ""}${s.pending ? " — can tap again" : ""}`);
+      } else if (r.result === "identified") {
+        setStatus("", r.name, `Balance ${money(r.balance_paise)}`);
+      } else {
+        setStatus("bad", "Card isn't registered", fmtUid(s.last_scan_uid));
+      }
+    }
+    if (waiting && !s.pending) {  // completed, cancelled elsewhere, or lapsed
+      if (!fresh || s.last_scan?.result !== "approved") setStatus("", "Charge ended", "Nobody tapped in time, or it was replaced.");
+      waiting = null; $("#c-cancel", view).classList.add("hidden");
+    }
+  }
+
+  async function loadSales() {
+    if (me.role !== "merchant_staff") { $("#c-sales-card", view).classList.add("hidden"); return; }
+    const sales = await api("/merchant/transactions?today_only=true");
+    const total = sales.reduce((t, s) => t - s.amount_paise, 0);
+    $("#c-sales-total", view).textContent = `${sales.filter((s) => s.type === "purchase").length} sales · ${money(total)} net`;
+    $("#c-sales", view).innerHTML = sales.map((s) => `<tr><td>${time(s.created_at)}</td><td>${esc(s.student_name)}</td>
+      <td class="num">${money(-s.amount_paise)}</td>
+      <td class="num">${s.type === "purchase" ? `<button class="btn small" data-refund="${s.id}">Refund</button>` : `<span class="pill">${s.type}</span>`}</td></tr>`).join("")
+      || `<tr><td colspan="4" class="muted">No sales yet today.</td></tr>`;
+    $("#c-sales", view).querySelectorAll("[data-refund]").forEach((b) => b.addEventListener("click", async () => {
+      if (!confirm("Refund this sale to the student's wallet?")) return;
+      try { await api(`/merchant/transactions/${b.dataset.refund}/refund`, { method: "POST" }); } catch (e) { alert(errText(e)); }
+      loadSales();
+    }));
+  }
+
+  every(1000, poll);
+  loadSales();
+}
+
+// ---------------------------------------------------------------- admin: students
+async function students(view) {
+  let rows = [];
+  const tbody = $("#s-rows", view);
+  const render = () => {
+    const q = $("#s-search", view).value.trim().toLowerCase().replace(/:/g, "");
+    tbody.innerHTML = rows.filter((s) => !q || s.name.toLowerCase().includes(q) || (s.tag_uid || "").toLowerCase().includes(q)).map((s) => `
+      <tr><td>${esc(s.name)}</td><td>${s.grade}</td><td class="mono">${s.tag_uid ? fmtUid(s.tag_uid) : '<span class="muted">none</span>'}</td>
+      <td>${s.card_status ? `<span class="pill ${s.card_status === "active" ? "ok" : "bad"}">${s.card_status}</span>` : ""}</td>
+      <td class="num">${money(s.balance_paise)}</td>
+      <td class="num"><button class="btn small" data-assign="${s.id}" title="Map the most recently tapped unknown card to this student">Assign tapped card</button></td></tr>`).join("")
+      || `<tr><td colspan="6" class="muted">No students yet.</td></tr>`;
+    tbody.querySelectorAll("[data-assign]").forEach((b) => b.addEventListener("click", async () => {
+      const [last] = await api("/admin/scans?unknown_only=true&limit=1");
+      if (!last) { show($("#s-msg", view), "Tap the new card on a reader first.", false); return; }
+      const name = rows.find((s) => s.id === b.dataset.assign).name;
+      if (!confirm(`Give card ${fmtUid(last.tag_uid)} (tapped ${ago(last.created_at)} at ${last.terminal_name}) to ${name}? Their old card will stop working.`)) return;
+      try {
+        await api(`/admin/students/${b.dataset.assign}/cards`, { method: "POST", body: { tag_uid: last.tag_uid } });
+        show($("#s-msg", view), `Card assigned to ${name}.`, true); load();
+      } catch (e) { show($("#s-msg", view), errText(e), false); }
+    }));
+  };
+  const load = async () => { rows = await api("/admin/students"); render(); };
+  $("#s-search", view).addEventListener("input", render);
+  await load();
+}
+
+// ---------------------------------------------------------------- admin: register
+async function register(view) {
+  const uid = $("#r-uid", view), detect = $("#r-detect", view);
+  const openedAt = Date.now();
+  let autoFilled = "";
+  every(1500, async () => {
+    const [last] = await api("/admin/scans?unknown_only=true&limit=1").catch(() => []);
+    // Only cards tapped in the last 5 minutes (or since the page opened) count.
+    if (!last || Date.now() - new Date(last.created_at) > 5 * 60 * 1000) return;
+    detect.className = "detect found";
+    detect.innerHTML = `<strong>Card ${esc(fmtUid(last.tag_uid))}</strong><div class="small">tapped at ${esc(last.terminal_name)} · ${ago(last.created_at)}</div>`;
+    if (!uid.value || uid.value === autoFilled) { uid.value = autoFilled = fmtUid(last.tag_uid); }
+  });
+
+  const kids = await api("/admin/students");
+  $("#p-child", view).innerHTML = kids.map((s) => `<option value="${s.id}">${esc(s.name)} (grade ${s.grade})</option>`).join("");
+
+  $("#r-form", view).addEventListener("submit", async (ev) => {
+    ev.preventDefault();
+    const login = $("#r-email", view).value.trim(), pw = $("#r-pw", view).value;
+    const body = {
+      name: $("#r-name", view).value.trim(), grade: Number($("#r-grade", view).value), preferred_language: $("#r-lang", view).value,
+      tag_uid: uid.value.trim() || null, daily_limit_paise: Math.round(Number($("#r-limit", view).value) * 100),
+      ...(login ? { [login.includes("@") ? "email" : "phone"]: login, password: pw } : {}),
+    };
+    try {
+      const s = await api("/admin/students", { method: "POST", body });
+      show($("#r-msg", view), `${s.name} created${s.tag_uid ? ` with card ${fmtUid(s.tag_uid)}. The card works now.` : " (no card yet)."}`, true);
+      ev.target.reset(); autoFilled = ""; uid.value = "";
+      detect.className = "detect"; detect.innerHTML = "<strong>Tap the next new card on any reader</strong>";
+    } catch (e) { show($("#r-msg", view), errText(e), false); }
+  });
+
+  $("#p-form", view).addEventListener("submit", async (ev) => {
+    ev.preventDefault();
+    const login = $("#p-login", view).value.trim();
+    try {
+      const p = await api("/admin/parents", { method: "POST", body: { name: $("#p-name", view).value.trim(), [login.includes("@") ? "email" : "phone"]: login, password: $("#p-pw", view).value } });
+      await api(`/admin/parents/${p.id}/students`, { method: "POST", body: { student_id: $("#p-child", view).value } });
+      show($("#p-msg", view), `${p.name} can now sign in and add money.`, true); ev.target.reset();
+    } catch (e) { show($("#p-msg", view), errText(e), false); }
+  });
+}
+
+// ---------------------------------------------------------------- admin: readers
+async function readers(view) {
+  const load = async () => {
+    const list = await api("/admin/terminals");
+    $("#rd-rows", view).innerHTML = list.map((t) => {
+      const online = t.last_seen_at && Date.now() - new Date(t.last_seen_at) < 3 * 60 * 1000;
+      return `<tr><td>${esc(t.name)}</td><td>${esc(t.merchant_name)}</td>
+        <td><span class="pill ${online ? "ok" : ""}">${online ? "online" : t.last_seen_at ? `seen ${ago(t.last_seen_at)}` : "never connected"}</span></td>
+        <td class="mono small">${t.id}</td></tr>`;
+    }).join("") || `<tr><td colspan="4" class="muted">No readers yet.</td></tr>`;
+    const shops = await api("/admin/merchants");
+    $("#rd-shop", view).innerHTML = shops.map((m) => `<option value="${m.id}">${esc(m.name)}</option>`).join("");
+  };
+  $("#rd-form", view).addEventListener("submit", async (ev) => {
+    ev.preventDefault();
+    try {
+      const c = await api("/admin/terminals", { method: "POST", body: { merchant_id: $("#rd-shop", view).value, name: $("#rd-name", view).value.trim() } });
+      $("#rd-config", view).textContent = `#define API_BASE "${location.origin}"\n#define TERMINAL_ID "${c.terminal_id}"\n#define TERMINAL_SECRET "${c.secret}"`;
+      $("#rd-secret", view).classList.remove("hidden"); ev.target.reset(); load();
+    } catch (e) { alert(errText(e)); }
+  });
+  $("#rd-copy", view).addEventListener("click", () => navigator.clipboard?.writeText($("#rd-config", view).textContent));
+  $("#sh-form", view).addEventListener("submit", async (ev) => {
+    ev.preventDefault();
+    try {
+      const m = await api("/admin/merchants", { method: "POST", body: { name: $("#sh-name", view).value.trim(), kind: $("#sh-kind", view).value } });
+      show($("#sh-msg", view), `${m.name} added.`, true); ev.target.reset(); load();
+    } catch (e) { show($("#sh-msg", view), errText(e), false); }
+  });
+  every(10000, load);
+}
+
+// ---------------------------------------------------------------- admin: taps log
+async function taps(view) {
+  every(2000, async () => {
+    const list = await api("/admin/scans?limit=100").catch(() => null);
+    if (!list) return;
+    $("#tp-rows", view).innerHTML = list.map((s) => {
+      const cls = { approved: "ok", identified: "", declined: "bad", unknown: "warn" }[s.result];
+      const label = s.result === "approved" && s.amount_paise ? `paid ${money(s.amount_paise)}` : s.result === "declined" ? reasonText(s.reason) : s.result;
+      return `<tr><td>${time(s.created_at)}</td><td>${esc(s.terminal_name)}</td><td class="mono">${fmtUid(s.tag_uid)}</td>
+        <td>${esc(s.student_name || "—")}</td><td><span class="pill ${cls}">${esc(label)}</span></td></tr>`;
+    }).join("") || `<tr><td colspan="5" class="muted">No taps yet. Tap a card on a reader.</td></tr>`;
+  });
+}
+
+// ---------------------------------------------------------------- parent
+async function parent(view) {
+  const box = $("#pa-children", view);
+  const load = async () => {
+    const kids = await api("/parents/me/children");
+    if (!kids.length) { box.innerHTML = `<div class="card muted">No children linked to your account yet. Ask the school office.</div>`; return; }
+    box.innerHTML = kids.map((k) => `
+      <div class="card" data-kid="${k.student_id}">
+        <div class="row" style="justify-content:space-between"><h2 style="margin:0">${esc(k.student_name)}</h2>
+          <span class="pill ${k.card_status === "active" ? "ok" : "bad"}">card ${esc(k.card_status || "none")}</span></div>
+        <div class="money" style="margin-top:8px">${money(k.balance_paise)}</div>
+        <div class="small muted">Spent today ${money(k.spent_today_paise)}${k.daily_limit_paise != null ? ` of ${money(k.daily_limit_paise)} daily limit` : ""}</div>
+        <label>Add money</label>
+        <div class="row">${[50, 100, 200, 500].map((r) => `<button class="btn primary" data-add="${r}">+ ₹${r}</button>`).join("")}</div>
+        <div class="row" style="margin-top:12px">
+          ${k.card_status === "active" ? `<button class="btn danger" data-block>Report card lost</button>` : ""}
+        </div>
+        <div class="msg hidden" data-msg></div>
+        <table style="margin-top:12px"><tbody data-txns></tbody></table>
+      </div>`).join("");
+    for (const card of box.querySelectorAll("[data-kid]")) {
+      const id = card.dataset.kid, msg = $("[data-msg]", card);
+      card.querySelectorAll("[data-add]").forEach((b) => b.addEventListener("click", async () => {
+        b.disabled = true;
+        try {
+          await api(`/wallets/${id}/topups`, { method: "POST", body: { amount_paise: Number(b.dataset.add) * 100, idempotency_key: crypto.randomUUID() } });
+          await load();
+        } catch (e) { show(msg, errText(e), false); b.disabled = false; }
+      }));
+      $("[data-block]", card)?.addEventListener("click", async () => {
+        if (!confirm("Block this card now? It will stop working immediately; the school can give a new one.")) return;
+        await api(`/students/${id}/card/block`, { method: "POST" }).catch((e) => show(msg, errText(e), false));
+        load();
+      });
+      const txns = await api(`/wallets/${id}/transactions?limit=8`);
+      $("[data-txns]", card).innerHTML = txns.map((t) => `<tr><td class="small muted">${new Date(t.created_at).toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" })}</td>
+        <td>${esc(t.description || t.type)}</td><td class="num" style="color:var(${t.amount_paise > 0 ? "--ok" : "--text"})">${t.amount_paise > 0 ? "+" : ""}${money(t.amount_paise)}</td></tr>`).join("");
+    }
+  };
+  await load();
+}
+
+// ---------------------------------------------------------------- student
+async function student(view) {
+  const w = await api(`/wallets/${me.id}`);
+  $("#st-balance", view).textContent = money(w.balance_paise);
+  $("#st-card", view).textContent = `Card ${w.card_status || "not issued"} · spent today ${money(w.spent_today_paise)}`;
+  const p = await api("/students/me/points");
+  $("#st-points", view).textContent = p.this_week;
+  $("#st-rank", view).textContent = p.rank_this_week ? `Rank #${p.rank_this_week} in school` : "Take a quiz to get on the leaderboard";
+  const txns = await api(`/wallets/${me.id}/transactions?limit=10`);
+  $("#st-txns", view).innerHTML = txns.map((t) => `<tr><td class="small muted">${new Date(t.created_at).toLocaleDateString("en-IN")}</td><td>${esc(t.description || t.type)}</td><td class="num">${money(t.amount_paise)}</td></tr>`).join("");
+}
+
+// ---------------------------------------------------------------- boot
+if (tokens) start().catch(logout);
+</script>
+</body>
+</html>

@@ -1,11 +1,12 @@
-"""Pretend to be an ESP32 reader: send signed requests to the Cresco API without any hardware.
+"""Pretend to be an ESP32 + PN532 reader: send signed scans to the Cresco API without hardware.
 
     uv run --project backend python scripts/sim_terminal.py --terminal-id ID --secret SECRET heartbeat
-    uv run --project backend python scripts/sim_terminal.py --terminal-id ID --secret SECRET charge --tag "CRESCO1|<token>|Arun" --amount 25
-    uv run --project backend python scripts/sim_terminal.py --terminal-id ID --secret SECRET redeem --tag "CRESCO1|<token>|Arun"
+    uv run --project backend python scripts/sim_terminal.py --terminal-id ID --secret SECRET scan 04:A1:B2:C3
+    uv run --project backend python scripts/sim_terminal.py --terminal-id ID --secret SECRET scan 04A1B2C3 --scan-id 7   # retry tap 7
 
-`--tag` is exactly the NDEF text written on the card (as printed by `python -m app.cli seed-demo`).
-The signing here is the reference for the firmware: see firmware/reader_esp32/reader_esp32.ino.
+What a scan does depends on the dashboard: with a charge set on this reader it pays, otherwise it
+identifies the student (or reports an unregistered card). The signing here is the reference for the
+firmware in cresco_pn523/cresco_pn523.ino.
 """
 
 import argparse
@@ -34,15 +35,8 @@ def send(base_url: str, terminal_id: str, secret: str, path: str, payload: dict)
         "X-Nonce": nonce,
         "X-Signature": sign(secret, ts, nonce, body),
     }
-    resp = httpx.post(f"{base_url}/v1/terminal/{path}", content=body, headers=headers, timeout=10)
+    resp = httpx.post(f"{base_url}/v1/terminal/{path}", content=body, headers=headers, timeout=30)
     return {"http_status": resp.status_code, **resp.json()}
-
-
-def card_token(tag_text: str) -> str:
-    parts = tag_text.split("|")
-    if len(parts) < 2 or parts[0] != "CRESCO1":
-        raise SystemExit("--tag must look like CRESCO1|<card_token>|<name>")
-    return parts[1]
 
 
 def main() -> None:
@@ -52,25 +46,16 @@ def main() -> None:
     p.add_argument("--secret", required=True)
     sub = p.add_subparsers(dest="command", required=True)
     sub.add_parser("heartbeat")
-    c = sub.add_parser("charge")
-    c.add_argument("--tag", required=True, help="NDEF text on the card")
-    c.add_argument("--uid", help="Tag hardware UID, e.g. 04A1B2C3")
-    c.add_argument("--amount", type=float, required=True, help="Rupees, e.g. 25 or 12.50")
-    c.add_argument("--key", help="Idempotency key (reuse it to simulate a retry)")
-    r = sub.add_parser("redeem")
-    r.add_argument("--tag", required=True)
-    r.add_argument("--key")
+    s = sub.add_parser("scan")
+    s.add_argument("uid", help="Card serial number, e.g. 04:A1:B2:C3 or 04A1B2C3")
+    s.add_argument("--scan-id", help="Reuse to simulate a retried request")
     args = p.parse_args()
 
-    key = getattr(args, "key", None) or secrets.token_hex(6)
     if args.command == "heartbeat":
         result = send(args.base_url, args.terminal_id, args.secret, "heartbeat", {})
-    elif args.command == "charge":
-        payload = {"card_token": card_token(args.tag), "tag_uid": args.uid, "amount_paise": round(args.amount * 100), "idempotency_key": key}
-        result = send(args.base_url, args.terminal_id, args.secret, "charge", payload)
     else:
-        payload = {"card_token": card_token(args.tag), "idempotency_key": key}
-        result = send(args.base_url, args.terminal_id, args.secret, "rewards/redeem", payload)
+        payload = {"tag_uid": args.uid, "scan_id": args.scan_id or secrets.token_hex(6)}
+        result = send(args.base_url, args.terminal_id, args.secret, "scan", payload)
     print(json.dumps(result, indent=2, ensure_ascii=False))
 
 

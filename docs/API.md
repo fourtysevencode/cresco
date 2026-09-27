@@ -1,6 +1,6 @@
 # Cresco API reference (v1)
 
-Interactive docs, where you can try every endpoint: **`http://localhost:8000/docs`**.
+The web dashboard is at **`/dashboard`**. Interactive API docs, where you can try every endpoint, are at **`/docs`**.
 
 ## Conventions
 
@@ -31,12 +31,15 @@ Interactive docs, where you can try every endpoint: **`http://localhost:8000/doc
 ### Admin (school)
 | | | |
 |---|---|---|
-| `POST` | `/v1/admin/students` | Create a student (also creates their wallet) |
+| `POST` | `/v1/admin/students` | **Create a user mapped to a card:** `{name, grade, tag_uid?, preferred_language?, daily_limit_paise?, email/phone + password?}`. Creates the wallet; with `tag_uid` the card works immediately. The login is optional and only needed for the AI tutor |
 | `GET` | `/v1/admin/students` | List the school's students |
 | `POST` | `/v1/admin/parents` | Create a parent account |
 | `POST` | `/v1/admin/parents/{parent_id}/students` | Link a parent to a student |
 | `POST` | `/v1/admin/merchant-staff` | Create a canteen/bookstore staff account |
-| `POST` | `/v1/admin/students/{id}/cards` | Issue an NFC card → `ndef_text` to write on the tag. Retires any previous card |
+| `POST` | `/v1/admin/students/{id}/cards` | `{tag_uid}`: map a card (by serial number) to a student. Retires their previous card |
+| `GET` | `/v1/admin/cards/lookup?tag_uid=04:A1:B2:C3` | Who a serial number belongs to |
+| `GET` | `/v1/admin/scans?unknown_only=true` | Recent taps on the school's readers. Unknown cards show up here, ready to register |
+| `GET` | `/v1/admin/merchants` · `/v1/admin/terminals` | Shops and readers (with last-seen time) |
 | `PATCH` | `/v1/admin/cards/{card_id}` | Block/unblock a card, change its daily limit |
 | `POST` | `/v1/admin/merchants` | Create a shop: `kind` is `canteen` or `bookstore` |
 | `POST` | `/v1/admin/terminals` | Register a reader → `terminal_id` + `secret` (shown once) |
@@ -54,24 +57,38 @@ Interactive docs, where you can try every endpoint: **`http://localhost:8000/doc
 | `PATCH` | `/v1/students/{student_id}/spend-limit` | Parent sets the card's daily limit |
 | `POST` | `/v1/students/{student_id}/card/block` | Parent reports the card lost; it stops working immediately |
 
-### Terminal (ESP32 readers, signed)
+### Terminal (ESP32 + PN532 readers, signed)
 | | | |
 |---|---|---|
-| `POST` | `/v1/terminal/heartbeat` | Connectivity + auth check |
-| `POST` | `/v1/terminal/charge` | `{card_token, tag_uid, amount_paise, idempotency_key}` → `{status, reason, name, balance_paise}` |
-| `POST` | `/v1/terminal/rewards/redeem` | `{card_token, idempotency_key}` → `{status, reason, name, reward, value_paise}` |
+| `POST` | `/v1/terminal/heartbeat` | Connectivity + auth check (the reader sends one every 60 s) |
+| `POST` | `/v1/terminal/scan` | `{tag_uid, scan_id}` → `{result, reason, name, balance_paise, amount_paise, reward}` |
 
-`charge` always returns HTTP 200 for a verified reader. `status` is `approved` or `declined`, and a declined charge carries one of these `reason`s:
+The reader only sends the card's serial number. The server decides what the tap means:
+
+| `result` | When |
+|---|---|
+| `approved` | A charge (or prize claim) was pending on this reader and it went through |
+| `declined` | A charge was pending but failed; see `reason`. The charge stays open so the student can tap again |
+| `identified` | Nothing pending; `name` and `balance_paise` say who tapped |
+| `unknown` | The serial number isn't registered (`reason: unregistered_card`) |
+
+A declined tap carries one of these `reason`s:
 
 | `reason` | Meaning |
 |---|---|
 | `insufficient_balance` | Not enough money in the wallet |
 | `daily_limit` | Today's spending would go over the card's daily limit |
 | `card_blocked` | Card is blocked, lost or replaced |
-| `unknown_card` | Card token isn't recognised |
-| `tag_mismatch` | Tag's hardware UID doesn't match the card |
 | `wrong_school` | Student is from a different school than this shop |
-| `idempotency_conflict` | Key was already used for a different card or amount |
+| `no_reward` | Prize claim, but the student has no prize for this shop |
+
+### Counter (cashier dashboard: merchant staff for their shop's readers, admins for any)
+| | | |
+|---|---|---|
+| `GET` | `/v1/merchant/terminals` | Readers you can operate |
+| `POST` | `/v1/merchant/terminals/{id}/pending` | `{kind: "charge", amount_paise}` or `{kind: "redeem"}`: what the next tap does. Replaces anything pending; lapses after 2 minutes |
+| `DELETE` | `/v1/merchant/terminals/{id}/pending` | Cancel |
+| `GET` | `/v1/merchant/terminals/{id}/status` | Poll about once a second: what's pending and the last tap's result |
 
 ### Merchant staff
 | | | |
@@ -112,7 +129,7 @@ Interactive docs, where you can try every endpoint: **`http://localhost:8000/doc
   - 3rd: free ice cream at the canteen
 
   Admins can change these through `/v1/admin/reward-config`.
-- Prizes expire after 14 days. The student claims one by tapping their card after the cashier presses **A** on the reader.
+- Prizes expire after 14 days. The student claims one by tapping their card after the cashier clicks **Redeem a prize** on the dashboard.
 
 All of these numbers are settings in `backend/app/core/config.py`.
 
@@ -127,6 +144,6 @@ Every `/v1/terminal/*` request carries four headers:
 | `X-Nonce` | 8–64 random characters, never reused |
 | `X-Signature` | `hex(HMAC_SHA256(secret, "<X-Timestamp>.<X-Nonce>.<raw request body>"))` |
 
-`scripts/sim_terminal.py` is the reference implementation, and `firmware/reader_esp32` has the C++ version.
+`scripts/sim_terminal.py` is the reference implementation, and `cresco_pn523/cresco_pn523.ino` has the C++ version.
 
-Readers must retry a timed-out `charge` or `redeem` with the **same** `idempotency_key` and a new nonce. The server returns the original result, so the student is charged once.
+Readers must retry a timed-out scan with the **same** `scan_id` and a new nonce. The server returns the original result, so the student is charged once.

@@ -95,16 +95,30 @@ class Reader:
         return await client.post(f"/v1/terminal/{path}", content=body, headers=self.headers(body, **kw))
 
 
+    async def scan(self, client: httpx.AsyncClient, uid: str, scan_id: str | None = None, **kw) -> httpx.Response:
+        return await self.post(client, "scan", {"tag_uid": uid, "scan_id": scan_id or secrets.token_hex(6)}, **kw)
+
+
 @dataclass
 class World:
     school_id: uuid.UUID
     admin: dict
     parent: dict
     staff: dict
-    students: list[dict]  # {"id", "headers", "card_token"}
+    students: list[dict]  # {"id", "headers", "uid", "card_id"}
     canteen: Reader
     bookstore: Reader
     canteen_id: uuid.UUID
+
+    async def set_pending(self, client, reader: Reader, amount: int | None = None, kind: str = "charge") -> httpx.Response:
+        # the canteen staff can drive the canteen reader; the admin drives any reader
+        headers = self.staff["headers"] if reader is self.canteen else self.admin["headers"]
+        return await client.post(f"/v1/merchant/terminals/{reader.id}/pending", json={"kind": kind, "amount_paise": amount}, headers=headers)
+
+    async def pay(self, client, student: dict, amount: int, scan_id: str | None = None) -> dict:
+        """Cashier sets a charge on the canteen reader, then the student taps."""
+        assert (await self.set_pending(client, self.canteen, amount)).status_code == 201
+        return (await self.canteen.scan(client, student["uid"], scan_id)).json()
 
 
 @pytest.fixture
@@ -131,9 +145,9 @@ async def world() -> World:
             st = await accounts.create_student(
                 session, school.id, name=f"Student {i}", email=f"s{i}@t.in", phone=None, password="secret1", grade=7, preferred_language="ta"
             )
-            card = await accounts.issue_card(session, st, None, 50_000)
+            card = await accounts.issue_card(session, st, f"04AA00{i:02X}", 50_000)
             await ledger.credit_topup(session, st.id, 10_000, f"seed:{st.id}")
-            students.append({"id": st.id, "headers": auth(st.id, "student"), "card_token": card.card_token, "card_id": card.id})
+            students.append({"id": st.id, "headers": auth(st.id, "student"), "uid": card.tag_uid, "card_id": card.id})
         session.add(ParentStudent(parent_id=parent.id, student_id=students[0]["id"]))
         await session.commit()
         return World(

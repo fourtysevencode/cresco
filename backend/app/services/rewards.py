@@ -1,37 +1,27 @@
+from dataclasses import dataclass
+
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.timeutil import now
-from app.models import Merchant, NfcCard, Reward, Terminal, User
+from app.models import Merchant, Reward, Terminal, User
 
 
+@dataclass
 class RedeemResult:
-    def __init__(self, status: str, reason: str | None = None, first_name: str | None = None, reward: Reward | None = None):
-        self.status = status
-        self.reason = reason
-        self.first_name = first_name
-        self.reward = reward
+    status: str  # "approved" | "declined"
+    reason: str | None = None
+    reward: Reward | None = None
 
 
-async def redeem_at_terminal(
-    session: AsyncSession, terminal: Terminal, merchant: Merchant, card_token: str, idempotency_key: str
-) -> RedeemResult:
-    """Redeem the student's oldest valid prize that this kind of shop can honour. Commits."""
+async def redeem(session: AsyncSession, terminal: Terminal, merchant: Merchant, student: User, idempotency_key: str) -> RedeemResult:
+    """Redeem the student's oldest valid prize that this kind of shop can honour. Flushes; caller commits."""
     key = f"{terminal.id}:{idempotency_key}"
     replay = (await session.execute(select(Reward).where(Reward.redeem_idempotency_key == key))).scalar_one_or_none()
-    card = (await session.execute(select(NfcCard).where(NfcCard.card_token == card_token))).scalar_one_or_none()
-    if card is None:
-        return RedeemResult("declined", "unknown_card")
-    student = await session.get(User, card.student_id)
-    assert student is not None
     if replay:
-        if replay.student_id != student.id:
-            return RedeemResult("declined", "idempotency_conflict")
-        return RedeemResult("approved", None, student.first_name, replay)
-    if card.status != "active":
-        return RedeemResult("declined", "card_blocked", student.first_name)
+        return RedeemResult("approved", reward=replay)
     if student.school_id != merchant.school_id:
-        return RedeemResult("declined", "wrong_school", student.first_name)
+        return RedeemResult("declined", "wrong_school")
 
     stmt = (
         select(Reward)
@@ -47,10 +37,10 @@ async def redeem_at_terminal(
     )
     reward = (await session.execute(stmt)).scalar_one_or_none()
     if reward is None:
-        return RedeemResult("declined", "no_reward", student.first_name)
+        return RedeemResult("declined", "no_reward")
     reward.status = "redeemed"
     reward.redeemed_at = now()
     reward.redeemed_terminal_id = terminal.id
     reward.redeem_idempotency_key = key
-    await session.commit()
-    return RedeemResult("approved", None, student.first_name, reward)
+    await session.flush()
+    return RedeemResult("approved", reward=reward)

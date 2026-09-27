@@ -7,6 +7,35 @@ from app.services import accounts
 from tests.conftest import Reader, auth
 
 
+async def test_register_card_by_tapping_it(client, world):
+    """The dashboard flow: tap an unknown card on any reader, then create the student with that serial number."""
+    admin = world.admin["headers"]
+    assert (await world.canteen.scan(client, "04:5E:21:9A:6B:70:80")).json()["result"] == "unknown"
+    unknown = (await client.get("/v1/admin/scans?unknown_only=true", headers=admin)).json()
+    assert [(u["tag_uid"], u["terminal_name"]) for u in unknown] == [("045E219A6B7080", "C1")]
+    assert (await client.get("/v1/admin/cards/lookup?tag_uid=045e219a6b7080", headers=admin)).json()["registered"] is False
+
+    # the create-user endpoint: a student mapped to the card, no login needed to pay
+    r = await client.post("/v1/admin/students", json={"name": "Meena K", "grade": 6, "tag_uid": unknown[0]["tag_uid"]}, headers=admin)
+    assert r.status_code == 201
+    meena = r.json()
+    assert meena["tag_uid"] == "045E219A6B7080" and meena["card_status"] == "active" and meena["balance_paise"] == 0
+    lookup = (await client.get("/v1/admin/cards/lookup?tag_uid=04:5E:21:9A:6B:70:80", headers=admin)).json()
+    assert lookup["registered"] and lookup["student_name"] == "Meena K"
+    tap = (await world.canteen.scan(client, "045E219A6B7080")).json()
+    assert tap["result"] == "identified" and tap["name"] == "Meena"
+
+    # a card can only belong to one student
+    dup = await client.post("/v1/admin/students", json={"name": "Other", "grade": 6, "tag_uid": "045E219A6B7080"}, headers=admin)
+    assert dup.status_code == 409 and dup.json()["detail"] == {"code": "card_in_use", "student_name": "Meena K"}
+    assert (await client.post("/v1/admin/students", json={"name": "X", "grade": 6, "tag_uid": "xyz"}, headers=admin)).status_code == 422
+    # a login-less student can't log in
+    assert (await client.post("/v1/admin/students", json={"name": "X", "grade": 6, "email": "x@t.in"}, headers=admin)).status_code == 422
+
+    listed = {s["name"]: s for s in (await client.get("/v1/admin/students", headers=admin)).json()}
+    assert listed["Meena K"]["tag_uid"] == "045E219A6B7080" and listed["Student 0"]["balance_paise"] == 10_000
+
+
 async def test_onboarding_end_to_end(client, world):
     admin = world.admin["headers"]
     r = await client.post(
@@ -14,13 +43,13 @@ async def test_onboarding_end_to_end(client, world):
         json={"name": "Meena K", "email": "meena@t.in", "password": "secret1", "grade": 6, "preferred_language": "te"},
         headers=admin,
     )
-    assert r.status_code == 201
+    assert r.status_code == 201 and r.json()["tag_uid"] is None
     student_id = r.json()["id"]
     dup = await client.post("/v1/admin/students", json={"name": "X", "email": "MEENA@t.in", "password": "secret1", "grade": 6}, headers=admin)
     assert dup.status_code == 409
 
     card = (await client.post(f"/v1/admin/students/{student_id}/cards", json={"tag_uid": "04:AA:BB:CC"}, headers=admin)).json()
-    assert card["ndef_text"] == f"CRESCO1|{card['card_token']}|Meena" and card["tag_uid"] == "04AABBCC"
+    assert card["tag_uid"] == "04AABBCC" and card["status"] == "active"
 
     parent = (await client.post("/v1/admin/parents", json={"name": "Ravi K", "phone": "+919800000000", "password": "secret1"}, headers=admin)).json()
     assert (await client.post(f"/v1/admin/parents/{parent['id']}/students", json={"student_id": student_id}, headers=admin)).status_code == 204
@@ -31,22 +60,27 @@ async def test_onboarding_end_to_end(client, world):
     wallet = (await client.post(f"/v1/wallets/{student_id}/topups", json={"amount_paise": 10_000}, headers=parent_headers)).json()
     assert wallet["balance_paise"] == 10_000
 
-    # new reader for the canteen
+    # new reader for the canteen; the admin sets a charge on it and Meena taps
     creds = (await client.post("/v1/admin/terminals", json={"merchant_id": str(world.canteen_id), "name": "C2"}, headers=admin)).json()
     reader = Reader(creds["terminal_id"], creds["secret"])
-    r = await reader.post(client, "charge", {"card_token": card["card_token"], "tag_uid": "04AABBCC", "amount_paise": 3_000, "idempotency_key": "1"})
-    assert r.json()["status"] == "approved" and r.json()["balance_paise"] == 7_000
+    await client.post(f"/v1/merchant/terminals/{reader.id}/pending", json={"amount_paise": 3_000}, headers=admin)
+    r = (await reader.scan(client, "04AABBCC")).json()
+    assert r["result"] == "approved" and r["balance_paise"] == 7_000
+    readers = (await client.get("/v1/admin/terminals", headers=admin)).json()
+    assert [(t["merchant_name"], t["name"]) for t in readers] == [("Books", "B1"), ("Canteen", "C1"), ("Canteen", "C2")]
 
     # rotating the secret locks out the old one
     rotated = (await client.post(f"/v1/admin/terminals/{creds['terminal_id']}/rotate-secret", headers=admin)).json()
     assert (await reader.post(client, "heartbeat", {})).status_code == 401
-    assert (await Reader(creds["terminal_id"], rotated["secret"]).post(client, "heartbeat", {})).status_code == 200
+    reader = Reader(creds["terminal_id"], rotated["secret"])
+    assert (await reader.post(client, "heartbeat", {})).status_code == 200
 
-    # reissuing a card retires the old one
-    new_card = (await client.post(f"/v1/admin/students/{student_id}/cards", json={}, headers=admin)).json()
-    old = await reader.post(client, "charge", {"card_token": card["card_token"], "amount_paise": 100, "idempotency_key": "2"}, secret=rotated["secret"])
-    assert old.json()["reason"] == "card_blocked"
+    # assigning a new card retires the old one; the old serial number becomes unknown-but-blocked
+    new_card = (await client.post(f"/v1/admin/students/{student_id}/cards", json={"tag_uid": "04DDEEFF"}, headers=admin)).json()
     assert new_card["status"] == "active"
+    await client.post(f"/v1/merchant/terminals/{reader.id}/pending", json={"amount_paise": 100}, headers=admin)
+    assert (await reader.scan(client, "04AABBCC")).json()["reason"] == "card_blocked"
+    assert (await reader.scan(client, "04DDEEFF")).json()["result"] == "approved"
 
 
 async def test_role_and_school_boundaries(client, world):
@@ -68,7 +102,7 @@ async def test_role_and_school_boundaries(client, world):
         )
         await s.commit()
     other_headers = auth(other.id, "admin")
-    assert (await client.post(f"/v1/admin/students/{st['id']}/cards", json={}, headers=other_headers)).status_code == 404
+    assert (await client.post(f"/v1/admin/students/{st['id']}/cards", json={"tag_uid": "0A0B0C0D"}, headers=other_headers)).status_code == 404
     assert (await client.get(f"/v1/wallets/{st['id']}", headers=other_headers)).status_code == 404
     assert (await client.get("/v1/admin/students", headers=other_headers)).json() == []
 

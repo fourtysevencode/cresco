@@ -4,5 +4,5 @@ backend/.env
 __pycache__/
 .pytest_cache/
 backend/data/
-firmware/reader_esp32/config.h
+cresco_pn523/config.h
 .DS_Store

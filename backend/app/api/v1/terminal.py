@@ -1,11 +1,14 @@
-"""Endpoints called by the ESP32 NFC readers. Every request must be HMAC-signed (see app.core.deps.get_terminal)."""
+"""Endpoints called by the ESP32 + PN532 readers. The reader only reads a card's serial number;
+the server decides what the tap means (see app.services.scans). Every request must be HMAC-signed
+(see app.core.deps.get_terminal)."""
 
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException, status
 
 from app.core.deps import SessionDep, TerminalDep
 from app.core.timeutil import now
-from app.schemas.wallet import ChargeIn, ChargeOut, HeartbeatOut, RedeemIn, RedeemOut
-from app.services import ledger, rewards
+from app.schemas.wallet import HeartbeatOut, ScanIn, ScanOut
+from app.services import scans
+from app.services.accounts import normalize_uid
 
 router = APIRouter(prefix="/terminal", tags=["terminal (ESP32)"])
 
@@ -15,25 +18,17 @@ async def heartbeat(ctx: TerminalDep):
     return HeartbeatOut(terminal=ctx.terminal.name, merchant=ctx.merchant.name, server_time=int(now().timestamp()))
 
 
-@router.post("/charge", response_model=ChargeOut)
-async def charge(body: ChargeIn, ctx: TerminalDep, session: SessionDep):
-    """Student taps their card to pay. Always 200: `status` says approved/declined, `reason` says why.
-    Retry with the same `idempotency_key` after a timeout — the student is charged at most once."""
-    result = await ledger.charge(
-        session, ctx.terminal, ctx.merchant, body.card_token, body.tag_uid, body.amount_paise, body.idempotency_key
-    )
-    return ChargeOut(status=result.status, reason=result.reason, name=result.first_name, balance_paise=result.balance_paise)
+@router.post("/scan", response_model=ScanOut)
+async def scan(body: ScanIn, ctx: TerminalDep, session: SessionDep):
+    """A card was tapped. Returns 200 with `result`:
 
+    - `approved` / `declined`: the cashier had set a charge (or prize claim) on this reader
+    - `identified`: nothing pending; here's who it is
+    - `unknown`: this serial number isn't registered yet
 
-@router.post("/rewards/redeem", response_model=RedeemOut)
-async def redeem(body: RedeemIn, ctx: TerminalDep, session: SessionDep):
-    """Student taps to claim a leaderboard prize (e.g. free ice cream at the canteen)."""
-    result = await rewards.redeem_at_terminal(session, ctx.terminal, ctx.merchant, body.card_token, body.idempotency_key)
-    reward = result.reward
-    return RedeemOut(
-        status=result.status,
-        reason=result.reason,
-        name=result.first_name,
-        reward=reward.title if reward else None,
-        value_paise=reward.value_paise if reward else None,
-    )
+    Retry a timed-out request with the same `scan_id`; it's processed once."""
+    try:
+        uid = normalize_uid(body.tag_uid)
+    except ValueError:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "invalid_tag_uid")
+    return await scans.handle_scan(session, ctx.terminal, ctx.merchant, uid, body.scan_id)

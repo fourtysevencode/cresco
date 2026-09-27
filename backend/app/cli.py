@@ -51,11 +51,12 @@ async def seed_demo() -> None:
             student = await accounts.create_student(
                 session, school.id, name=name, email=f"student{i + 1}@demo.cresco", phone=None, password=password, preferred_language=lang, grade=grade
             )
-            card = await accounts.issue_card(session, student, None, None)
+            # Demo serial numbers; register real cards from the dashboard (tap an unknown card).
+            card = await accounts.issue_card(session, student, f"C0DE{i + 1:04X}", None)
             if i < 2:
                 session.add(ParentStudent(parent_id=parent.id, student_id=student.id))
             await ledger.credit_topup(session, student.id, 20_000, f"seed:{student.id}", description="Demo balance")
-            students.append({"name": name, "login": student.email, "student_id": str(student.id), "ndef_text": accounts.ndef_text(card, student)})
+            students.append({"name": name, "login": student.email, "student_id": str(student.id), "tag_uid": card.tag_uid})
         await session.commit()
 
         print(

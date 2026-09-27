@@ -117,12 +117,14 @@ async def test_leaderboard_week_close_and_redeem(client, world):
     assert [(w["rank"], w["student_id"]) for w in winners] == [(1, str(s1["id"])), (2, str(s0["id"])), (3, str(s2["id"]))]
 
     # 3rd place wins a free ice cream: redeemable at the canteen, not the bookstore, and only once.
-    redeem = {"card_token": s2["card_token"], "idempotency_key": "ice-1"}
-    assert (await world.bookstore.post(client, "rewards/redeem", redeem)).json()["reason"] == "no_reward"
-    r = (await world.canteen.post(client, "rewards/redeem", redeem)).json()
-    assert r["status"] == "approved" and "ice cream" in r["reward"]
-    assert (await world.canteen.post(client, "rewards/redeem", redeem)).json()["status"] == "approved"  # retry, same key
-    assert (await world.canteen.post(client, "rewards/redeem", {**redeem, "idempotency_key": "ice-2"})).json()["reason"] == "no_reward"
+    await world.set_pending(client, world.bookstore, kind="redeem")
+    assert (await world.bookstore.scan(client, s2["uid"])).json()["reason"] == "no_reward"
+    await world.set_pending(client, world.canteen, kind="redeem")
+    r = (await world.canteen.scan(client, s2["uid"], "ice-1")).json()
+    assert r["result"] == "approved" and "ice cream" in r["reward"]
+    assert (await world.canteen.scan(client, s2["uid"], "ice-1")).json()["result"] == "approved"  # retried tap
+    await world.set_pending(client, world.canteen, kind="redeem")
+    assert (await world.canteen.scan(client, s2["uid"])).json()["reason"] == "no_reward"
     rewards = (await client.get("/v1/students/me/rewards", headers=s2["headers"])).json()
     assert [x["status"] for x in rewards] == ["redeemed"]
 
@@ -149,6 +151,6 @@ async def test_expired_reward_not_redeemable(client, world):
             )
         )
         await s.commit()
-    r = await world.canteen.post(client, "rewards/redeem", {"card_token": st["card_token"], "idempotency_key": "x"})
-    assert r.json()["reason"] == "no_reward"
+    await world.set_pending(client, world.canteen, kind="redeem")
+    assert (await world.canteen.scan(client, st["uid"])).json()["reason"] == "no_reward"
     assert (await client.get("/v1/students/me/rewards", headers=st["headers"])).json()[0]["status"] == "expired"
