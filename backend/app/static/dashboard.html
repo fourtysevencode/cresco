@@ -181,7 +181,11 @@
 <template id="t-readers">
   <div class="card">
     <h2>Readers</h2>
-    <table><thead><tr><th>Reader</th><th>Shop</th><th>Status</th><th>Terminal ID</th></tr></thead><tbody id="rd-rows"></tbody></table>
+    <table><thead><tr><th>Reader</th><th>Shop</th><th>Status</th><th>Terminal ID</th><th></th></tr></thead><tbody id="rd-rows"></tbody></table>
+    <div id="rd-rotated" class="hidden">
+      <div class="msg ok">New secret issued. Copy these into <span class="mono">config.h</span> and re-upload; the old secret no longer works.</div>
+      <pre class="secret mono" id="rd-rotated-config"></pre>
+    </div>
   </div>
   <div class="grid">
     <div class="card">
@@ -473,6 +477,8 @@ async function register(view) {
 }
 
 // ---------------------------------------------------------------- admin: readers
+const configSnippet = (c) => `#define API_BASE "${location.origin}"\n#define TERMINAL_ID "${c.terminal_id}"\n#define TERMINAL_SECRET "${c.secret}"`;
+
 async function readers(view) {
   const load = async () => {
     const list = await api("/admin/terminals");
@@ -480,8 +486,17 @@ async function readers(view) {
       const online = t.last_seen_at && Date.now() - new Date(t.last_seen_at) < 3 * 60 * 1000;
       return `<tr><td>${esc(t.name)}</td><td>${esc(t.merchant_name)}</td>
         <td><span class="pill ${online ? "ok" : ""}">${online ? "online" : t.last_seen_at ? `seen ${ago(t.last_seen_at)}` : "never connected"}</span></td>
-        <td class="mono small">${t.id}</td></tr>`;
-    }).join("") || `<tr><td colspan="4" class="muted">No readers yet.</td></tr>`;
+        <td class="mono small">${t.id}</td>
+        <td class="num"><button class="btn small" data-rotate="${t.id}" data-name="${esc(t.name)}">New secret</button></td></tr>`;
+    }).join("") || `<tr><td colspan="5" class="muted">No readers yet.</td></tr>`;
+    $("#rd-rows", view).querySelectorAll("[data-rotate]").forEach((b) => b.addEventListener("click", async () => {
+      if (!confirm(`Issue a new secret for ${b.dataset.name}? It stops working until you put the new secret in its config.h.`)) return;
+      try {
+        const c = await api(`/admin/terminals/${b.dataset.rotate}/rotate-secret`, { method: "POST" });
+        $("#rd-rotated-config", view).textContent = configSnippet(c);
+        $("#rd-rotated", view).classList.remove("hidden");
+      } catch (e) { alert(errText(e)); }
+    }));
     const shops = await api("/admin/merchants");
     $("#rd-shop", view).innerHTML = shops.map((m) => `<option value="${m.id}">${esc(m.name)}</option>`).join("");
   };
@@ -489,7 +504,7 @@ async function readers(view) {
     ev.preventDefault();
     try {
       const c = await api("/admin/terminals", { method: "POST", body: { merchant_id: $("#rd-shop", view).value, name: $("#rd-name", view).value.trim() } });
-      $("#rd-config", view).textContent = `#define API_BASE "${location.origin}"\n#define TERMINAL_ID "${c.terminal_id}"\n#define TERMINAL_SECRET "${c.secret}"`;
+      $("#rd-config", view).textContent = configSnippet(c);
       $("#rd-secret", view).classList.remove("hidden"); ev.target.reset(); load();
     } catch (e) { alert(errText(e)); }
   });
