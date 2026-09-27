@@ -6,6 +6,7 @@
   "scripts": {
     "start": "node src/cli.js",
     "doctor": "node src/cli.js",
+    "odyssey": "node src/odyssey-launcher.js",
     "test": "node --test"
   },
   "engines": {

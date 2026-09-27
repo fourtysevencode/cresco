@@ -14,6 +14,8 @@ If the Git credential helper is not signed in, set `GITHUB_TOKEN` in your shell'
 
 ## Run
 
+Launch the interactive **Odyssey** terminal with `npm run odyssey`. It shows an Odysseus portrait, asks for the GitHub repository, and lets you press Enter to skip the optional live API URL. An animated progress bar stays visible during the scan; the final report shows severity counts, blocking logical errors, and draft PR links. On the configured Windows machine, the **Odyssey API Doctor** desktop shortcut opens this launcher in PowerShell.
+
 ```bash
 # Repository only: investigate critical/high/medium and blocking logical issues, then open draft fix PRs
 npm run doctor -- inspect https://github.com/owner/repository
