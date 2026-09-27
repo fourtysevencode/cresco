@@ -1,7 +1,8 @@
 import { proposePatch } from './diagnose.js';
 import { analyzeRepositoryFiles, selectSourcePaths } from './repository.js';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
+import { eligibleForPullRequest } from './eligibility.js';
 
 async function github(token, method, url, body) {
   const response = await fetch(`https://api.github.com${url}`, {
@@ -104,8 +105,9 @@ function applyExactEdit(source, finding) {
   }
   const first = source.indexOf(original);
   if (first < 0 || source.indexOf(original, first + original.length) >= 0) throw new Error('The proposed source edit does not match exactly one current source location');
-  const actualLine = source.slice(0, first).split('\n').length;
-  if (!Number.isInteger(line) || Math.abs(actualLine - line) > 2) throw new Error('The proposed source edit does not match its reported line');
+  const startLine = source.slice(0, first).split('\n').length;
+  const endLine = startLine + original.split('\n').length - 1;
+  if (!Number.isInteger(line) || line < startLine - 3 || line > endLine + 3) throw new Error('The proposed source edit does not match its reported line');
   return source.slice(0, first) + replacement + source.slice(first + original.length);
 }
 
@@ -114,7 +116,7 @@ function validateSyntax(filePath, content) {
   if (/\.py$/i.test(filePath)) {
     result = spawnSync('python', ['-c', 'import sys; compile(sys.stdin.read(), "candidate.py", "exec")'], { input: content, encoding: 'utf8', timeout: 5_000, windowsHide: true });
   } else if (/\.(?:js|mjs|cjs)$/i.test(filePath)) {
-    result = spawnSync(process.execPath, ['--check', '--input-type=module'], { input: content, encoding: 'utf8', timeout: 5_000, windowsHide: true });
+    result = spawnSync(process.execPath, ['--check', `--input-type=${/\.cjs$/i.test(filePath) ? 'commonjs' : 'module'}`], { input: content, encoding: 'utf8', timeout: 5_000, windowsHide: true });
   } else {
     throw new Error(`Automatic PRs do not yet support syntax validation for ${filePath}`);
   }
@@ -136,15 +138,21 @@ async function writableRepository(token, upstream, base, upstreamRepo) {
   }
 }
 
-export async function createFindingPullRequest({ token, repository, finding, mode = 'security' }) {
+export async function createFindingPullRequest({ token, repository, finding, mode = 'repository' }) {
   if (!token) throw new Error('GITHUB_TOKEN is required to create a pull request');
   if (!/^[\w.-]+\/[\w.-]+$/.test(repository)) throw new Error('Invalid repository');
   if (!finding?.filePath || !/^[\w./-]+$/.test(finding.filePath) || finding.filePath.startsWith('/') || finding.filePath.split('/').includes('..')) throw new Error('Invalid source path');
-  if (mode === 'security' && finding.severity !== 'critical') throw new Error('Only critical security findings can open repo-only PRs');
-  if (mode === 'security' && /(?:exposed|leaked|hardcoded)\s+(?:secret|credential|token|password|key)/i.test(finding.title)) throw new Error('Exposed credentials require rotation and cannot be safely fixed by an automatic PR');
+  if (!eligibleForPullRequest(finding)) throw new Error('Finding is below the PR threshold: requires critical, high, medium, or blocking logic');
+  if (/(?:exposed|leaked|hardcoded)\s+(?:secret|credential|token|password|key)/i.test(finding.title)) throw new Error('Exposed credentials require rotation and cannot be safely fixed by an automatic PR');
   const upstream = `/repos/${repository}`;
   const repo = await github(token, 'GET', upstream);
   const base = repo.default_branch;
+  const fingerprint = createHash('sha256').update(JSON.stringify([repository, mode, finding.filePath, finding.original, finding.replacement])).digest('hex').slice(0, 20);
+  const marker = `<!-- api-doctor:${fingerprint} -->`;
+  const openPulls = await github(token, 'GET', `${upstream}/pulls?state=open&per_page=100`);
+  const sourceMarker = `**Source:** \`${finding.filePath}:${finding.line}\``;
+  const existing = Array.isArray(openPulls) ? openPulls.find(pr => pr.body?.includes(marker) || (pr.title?.startsWith('[API Doctor]') && pr.body?.includes(sourceMarker))) : null;
+  if (existing) return { url: existing.html_url, number: existing.number, existing: true };
   const target = await writableRepository(token, repository, base, repo);
   const targetRoot = `/repos/${target.repository}`;
   const { file, encodedPath, source } = await sourceFile(token, target.repository, finding.filePath, base);
@@ -163,7 +171,7 @@ export async function createFindingPullRequest({ token, repository, finding, mod
     title: `[API Doctor] ${finding.title.slice(0, 100)}`,
     head: `${target.headPrefix}${branch}`,
     base,
-    body: `## ${mode === 'security' ? 'Critical security finding' : 'Observed API failure'}\n\n${finding.detail}\n\n**Impact:** ${finding.impact}\n\n**Source:** \`${finding.filePath}:${finding.line}\`\n\n**Validation:** ${finding.testPlan}\n\nProposed by API Doctor with Codex Luna. This is a draft; maintainers should review and run their tests before merging.`,
+    body: `## ${mode === 'repository' ? 'Repository finding' : 'Observed API failure'}\n\n${finding.detail}\n\n**Severity:** ${finding.severity}\n\n**Impact:** ${finding.impact}\n\n**Source:** \`${finding.filePath}:${finding.line}\`\n\n**Validation:** ${finding.testPlan}\n\nProposed by API Doctor with Codex Luna. This is a draft; maintainers should review and run their tests before merging.\n\n${marker}`,
     draft: true,
     maintainer_can_modify: true
   });

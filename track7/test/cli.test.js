@@ -14,6 +14,10 @@ test('CLI accepts repo-only and repo plus live URL, and rejects unsafe URLs', ()
   assert.equal(parseArgs(['inspect', 'https://github.com/team/campus-api']).noAi, false);
   assert.equal(parseArgs(['inspect', 'https://github.com/team/campus-api', '--dry-run']).dryRun, true);
   assert.equal(parseArgs(['inspect', 'https://github.com/team/campus-api', '--live', 'https://api.example.com/health']).liveUrl, 'https://api.example.com/health');
+  const pasted = parseArgs(['inspect', '[https://github.com/team/campus-api](https://github.com/team/campus-api)', '--', 'live', 'https\\://api.example.com/health']);
+  assert.equal(pasted.repository, 'team/campus-api');
+  assert.equal(pasted.liveUrl, 'https://api.example.com/health');
+  assert.throws(() => parseRepositoryUrl('[https://github.com/team/api](https://github.com/other/api)'), /GitHub repository URL/);
   assert.throws(() => parseArgs(['inspect', 'https://github.com/team/campus-api', '--watch']), /requires --live/);
   assert.throws(() => parseRepositoryUrl('https://github.com/team/repo/tree/main'), /GitHub URL/);
   assert.throws(() => validateLiveUrl('http://127.0.0.1:4101/api'), /public HTTPS/);
@@ -37,6 +41,29 @@ test('Luna review refuses API-key or missing CLI auth before making a model call
   const run = async () => { calls++; return { code: 0, stdout: 'Logged in using API key', stderr: '' }; };
   await assert.rejects(() => reviewWithCodex({ repository: 'team/api', sourceFiles: [] }, { run }), /not signed in with ChatGPT/);
   assert.equal(calls, 1);
+});
+
+test('repo-only Luna output keeps critical, high, medium, and blocking logic in scanned files', async () => {
+  const calls = [];
+  const findings = [
+    { title: 'Critical injection', filePath: 'app.js', severity: 'critical', original: 'eval(x)', replacement: 'String(x)' },
+    { title: 'High issue', filePath: 'app.js', severity: 'high', original: 'eval(x)', replacement: 'String(x)' },
+    { title: 'Medium issue', filePath: 'app.js', severity: 'medium', original: 'eval(x)', replacement: 'String(x)' },
+    { title: 'Startup failure', filePath: 'app.js', severity: 'low', category: 'logic', blocksProject: true, original: 'eval(x)', replacement: 'String(x)' },
+    { title: 'Low edge case', filePath: 'app.js', severity: 'low', category: 'logic', blocksProject: false, original: 'eval(x)', replacement: 'String(x)' },
+    { title: 'Outside scan', filePath: 'other.js', severity: 'critical', original: 'eval(x)', replacement: 'String(x)' }
+  ];
+  const run = async (args, input) => {
+    calls.push({ args, input });
+    return calls.length === 1
+      ? { code: 0, stdout: 'Logged in using ChatGPT', stderr: '' }
+      : { code: 0, stdout: JSON.stringify({ summary: 'Four findings', findings }), stderr: '' };
+  };
+  const analysis = await reviewWithCodex({ repository: 'team/api', filePaths: ['app.js'], sourceFiles: [{ path: 'app.js', content: 'eval(x)' }] }, { run });
+  assert.deepEqual(analysis.findings.map(finding => finding.title), ['Critical injection', 'High issue', 'Medium issue', 'Startup failure']);
+  assert.match(calls[1].input, /critical, high, or medium/);
+  assert.match(calls[1].input, /blocksProject true only/);
+  assert.ok(calls[1].args.includes('gpt-6-luna'));
 });
 
 test('repo-only and repo plus live URL work without a pasted stack trace', async () => {
@@ -99,11 +126,11 @@ test('a live 500 without a traceback is reported as confirmed failure with unkno
 test('critical finding creates a real draft PR request from a fork branch', async () => {
   const originalFetch = globalThis.fetch;
   const calls = [];
-  const source = "app.get('/run', (req, res) => res.send(eval(req.query.code)));\n";
+  const source = "exports.run = (req, res) => {\n  const value = req.body.value;\n  if (typeof value !== 'string') return res.sendStatus(400);\n  return res.send(eval(value));\n};\n";
   const finding = {
     title: 'Remote code execution through eval', detail: 'Untrusted query input reaches eval.',
-    filePath: 'app.js', line: 1, severity: 'critical', impact: 'An attacker can run server code.',
-    original: 'eval(req.query.code)', replacement: 'String(req.query.code)', testPlan: 'Verify /run returns text without evaluation.'
+    filePath: 'app.js', line: 4, severity: 'critical', impact: 'An attacker can run server code.',
+    original: source.slice(0, -1), replacement: source.slice(0, -1).replace('eval(value)', 'String(value)'), testPlan: 'Verify /run returns text without evaluation.'
   };
   globalThis.fetch = async (url, options) => {
     const pathname = new URL(url).pathname;
@@ -124,9 +151,74 @@ test('critical finding creates a real draft PR request from a fork branch', asyn
     assert.equal(pr.fork, true);
     const fileWrite = calls.find(call => call.method === 'PUT');
     assert.equal(Buffer.from(fileWrite.body.content, 'base64').toString(), source.replace(finding.original, finding.replacement));
-    const request = calls.find(call => call.pathname === '/repos/team/api/pulls');
+    const request = calls.find(call => call.pathname === '/repos/team/api/pulls' && call.method === 'POST');
     assert.equal(request.body.draft, true);
-    assert.match(request.body.head, /^doctor:api-doctor\/security-/);
+    assert.match(request.body.head, /^doctor:api-doctor\/repository-/);
     assert.equal(request.body.base, 'main');
+  } finally { globalThis.fetch = originalFetch; }
+});
+
+test('a low-severity startup-blocking logic bug can create a draft PR', async () => {
+  const originalFetch = globalThis.fetch;
+  const calls = [];
+  const source = "const port = config.server.port.trim();\napp.listen(port);\n";
+  globalThis.fetch = async (url, options) => {
+    const pathname = new URL(url).pathname;
+    calls.push({ method: options.method, pathname, body: options.body ? JSON.parse(options.body) : null });
+    const data = pathname === '/repos/team/api' && options.method === 'GET'
+      ? { default_branch: 'main', permissions: { push: true } }
+      : pathname === '/repos/team/api/contents/app.js'
+        ? { type: 'file', size: source.length, encoding: 'base64', content: Buffer.from(source).toString('base64'), sha: 'file-sha' }
+        : pathname === '/repos/team/api/git/ref/heads/main'
+          ? { object: { sha: 'base-sha' } }
+          : pathname === '/repos/team/api/pulls' && options.method === 'POST'
+            ? { html_url: 'https://github.com/team/api/pull/9', number: 9 }
+            : [];
+    return new Response(JSON.stringify(data), { status: 200, headers: { 'Content-Type': 'application/json' } });
+  };
+  try {
+    const finding = {
+      title: 'Missing config prevents startup', detail: 'Missing server port causes a startup exception.',
+      severity: 'low', category: 'logic', blocksProject: true, filePath: 'app.js', line: 1, impact: 'The API cannot start.',
+      original: 'config.server.port.trim()', replacement: "String(config.server?.port ?? 3000).trim()", testPlan: 'Start the API without server.port.'
+    };
+    const pr = await createFindingPullRequest({ token: 'fake-token', repository: 'team/api', finding });
+    assert.equal(pr.url, 'https://github.com/team/api/pull/9');
+    const request = calls.find(call => call.pathname === '/repos/team/api/pulls' && call.method === 'POST');
+    assert.match(request.body.body, /\*\*Severity:\*\* low/);
+    assert.equal(request.body.draft, true);
+    assert.ok(!calls.some(call => call.pathname === '/repos/team/api/forks'));
+  } finally { globalThis.fetch = originalFetch; }
+});
+
+test('ordinary low-severity findings are rejected before any GitHub request', async () => {
+  const originalFetch = globalThis.fetch;
+  let calls = 0;
+  globalThis.fetch = async () => { calls++; throw new Error('GitHub must not be called'); };
+  try {
+    await assert.rejects(() => createFindingPullRequest({
+      token: 'fake-token', repository: 'team/api',
+      finding: { title: 'Missing name affects one request', severity: 'low', category: 'logic', blocksProject: false, filePath: 'app.js' }
+    }), /below the PR threshold/);
+    assert.equal(calls, 0);
+  } finally { globalThis.fetch = originalFetch; }
+});
+
+test('a repeated finding reuses an open API Doctor PR', async () => {
+  const originalFetch = globalThis.fetch;
+  const methods = [];
+  globalThis.fetch = async (url, options) => {
+    methods.push(options.method);
+    const pathname = new URL(url).pathname;
+    const data = pathname === '/repos/team/api'
+      ? { default_branch: 'main' }
+      : [{ title: '[API Doctor] Existing fix', body: '**Source:** `app.js:4`', html_url: 'https://github.com/team/api/pull/8', number: 8 }];
+    return new Response(JSON.stringify(data), { status: 200, headers: { 'Content-Type': 'application/json' } });
+  };
+  try {
+    const pr = await createFindingPullRequest({ token: 'fake-token', repository: 'team/api', finding: { title: 'Finding', filePath: 'app.js', line: 4, severity: 'critical', original: 'eval(value)', replacement: 'String(value)' } });
+    assert.equal(pr.existing, true);
+    assert.equal(pr.url, 'https://github.com/team/api/pull/8');
+    assert.deepEqual(methods, ['GET', 'GET']);
   } finally { globalThis.fetch = originalFetch; }
 });
