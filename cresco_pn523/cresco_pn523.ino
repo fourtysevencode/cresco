@@ -49,6 +49,9 @@
 #ifndef TFT_RST
 #define TFT_RST 1
 #endif
+#ifndef TFT_BL
+#define TFT_BL 21    // display LED / BL / BLK (backlight); -1 if it's wired to 3V3
+#endif
 #ifndef TFT_TAB
 #define TFT_TAB INITR_BLACKTAB  // try INITR_GREENTAB or INITR_REDTAB if colours or edges look wrong
 #endif
@@ -296,6 +299,10 @@ void setup() {
     if (pin >= 0) pinMode(pin, OUTPUT);
   }
 
+  if (TFT_BL >= 0) {
+    pinMode(TFT_BL, OUTPUT);
+    digitalWrite(TFT_BL, HIGH);  // backlight on
+  }
   SPI.begin(TFT_SCK, -1, TFT_MOSI, TFT_CS);
   tft.initR(TFT_TAB);
   tft.setRotation(0);  // portrait, 128 wide x 160 tall

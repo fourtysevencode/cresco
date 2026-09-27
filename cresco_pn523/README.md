@@ -30,11 +30,12 @@ Set the PN532's mode switches to **I2C**. LEDs and a buzzer are optional; set th
 | CS | GPIO 10 |
 | DC / A0 / RS | GPIO 3 |
 | RST / RES | GPIO 1 |
-| LED / BL / BLK (backlight) | 3V3 |
+| LED / BL / BLK (backlight) | GPIO 21 |
 
 The display shows **Waiting** while idle, **Sending** while a tap is being sent, then a green tick with the student's name (paid or identified) or a red cross with the reason (declined, unregistered card, no connection). After 2.5 s it goes back to **Waiting**.
 
-- The pins are defaults in `cresco_pn523.ino`; to use other pins, `#define TFT_SCK`, `TFT_MOSI`, `TFT_CS`, `TFT_DC` or `TFT_RST` in `config.h`. If RST is wired to 3V3, set `TFT_RST` to `-1`.
+- The pins are defaults in `cresco_pn523.ino`; to use other pins, `#define TFT_SCK`, `TFT_MOSI`, `TFT_CS`, `TFT_DC`, `TFT_RST` or `TFT_BL` in `config.h`. If RST or BL is wired to 3V3 instead, set `TFT_RST` / `TFT_BL` to `-1`.
+- The backlight is driven from GPIO 21, so only one 3V3 pin is needed (for VCC). Share it with the PN532 through the breadboard's power rail.
 - If the colours are swapped or there's a stripe of noise along one edge, add `#define TFT_TAB INITR_GREENTAB` (or `INITR_REDTAB`) to `config.h`.
 - Leave the display's MISO/SDO pin (if it has one) and the SD-card pins unconnected.
 

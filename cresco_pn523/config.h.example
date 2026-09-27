@@ -18,11 +18,12 @@
 #define PIN_BUZZER -1      // active buzzer
 
 // ST7735 display (1.8" 128x160 TFT, SPI). These match the defaults in cresco_pn523.ino; change them
-// only if you wired the display differently. Set TFT_RST to -1 if RST is tied to 3V3.
+// only if you wired the display differently. Set TFT_RST / TFT_BL to -1 if that pin is tied to 3V3.
 #define TFT_SCK 6    // display SCK / SCL / CLK
 #define TFT_MOSI 7   // display SDA / MOSI / DIN
 #define TFT_CS 10
 #define TFT_DC 3     // display DC / A0 / RS
 #define TFT_RST 1
+#define TFT_BL 21    // display LED / BL / BLK (backlight)
 // If colours are swapped or one edge shows noise, try INITR_GREENTAB or INITR_REDTAB.
 #define TFT_TAB INITR_BLACKTAB
