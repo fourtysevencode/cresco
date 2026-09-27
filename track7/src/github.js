@@ -1,8 +1,12 @@
 import { proposePatch } from './diagnose.js';
+import { analyzeRepositoryFiles, selectSourcePaths } from './repository.js';
+import { randomUUID } from 'node:crypto';
+import { spawnSync } from 'node:child_process';
 
 async function github(token, method, url, body) {
   const response = await fetch(`https://api.github.com${url}`, {
     method,
+    signal: AbortSignal.timeout(10_000),
     headers: {
       Accept: 'application/vnd.github+json',
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
@@ -12,8 +16,37 @@ async function github(token, method, url, body) {
     body: body ? JSON.stringify(body) : undefined
   });
   const data = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(`GitHub ${method} ${url}: ${response.status} ${data.message ?? 'request failed'}`);
+  if (!response.ok) {
+    const error = new Error(`GitHub ${method} ${url}: ${response.status} ${data.message ?? 'request failed'}`);
+    error.status = response.status;
+    throw error;
+  }
   return data;
+}
+
+export async function inspectGitHubRepository({ token, repository }) {
+  if (!/^[\w.-]+\/[\w.-]+$/.test(repository)) throw new Error('Invalid repository');
+  const root = `/repos/${repository}`;
+  const repo = await github(token, 'GET', root);
+  const tree = await github(token, 'GET', `${root}/git/trees/${encodeURIComponent(repo.default_branch)}?recursive=1`);
+  if (!Array.isArray(tree.tree)) throw new Error('GitHub did not return a repository file tree');
+  const paths = selectSourcePaths(tree.tree);
+  const files = [];
+  for (const path of paths) {
+    try {
+      const { source } = await sourceFile(token, repository, path, repo.default_branch);
+      files.push({ path, content: source });
+    } catch (error) {
+      if (!/GitHub GET .*: (403|429)/.test(error.message)) continue;
+      throw error;
+    }
+  }
+  const report = analyzeRepositoryFiles(repository, files, {
+    defaultBranch: repo.default_branch,
+    incomplete: Boolean(tree.truncated) || paths.length === 24 || files.length !== paths.length
+  });
+  Object.defineProperty(report, 'sourceFiles', { value: files });
+  return report;
 }
 
 async function sourceFile(token, repository, filePath, branch) {
@@ -62,4 +95,77 @@ export async function createFixPullRequest({ token, repository, filePath, diagno
     draft: true
   });
   return { url: pull.html_url, number: pull.number, patch };
+}
+
+function applyExactEdit(source, finding) {
+  const { original, replacement, line } = finding;
+  if (typeof original !== 'string' || !original.trim() || original.length > 8_000 || typeof replacement !== 'string' || replacement.length > 12_000 || original === replacement) {
+    throw new Error('The proposed source edit is empty, unchanged, or too large');
+  }
+  const first = source.indexOf(original);
+  if (first < 0 || source.indexOf(original, first + original.length) >= 0) throw new Error('The proposed source edit does not match exactly one current source location');
+  const actualLine = source.slice(0, first).split('\n').length;
+  if (!Number.isInteger(line) || Math.abs(actualLine - line) > 2) throw new Error('The proposed source edit does not match its reported line');
+  return source.slice(0, first) + replacement + source.slice(first + original.length);
+}
+
+function validateSyntax(filePath, content) {
+  let result;
+  if (/\.py$/i.test(filePath)) {
+    result = spawnSync('python', ['-c', 'import sys; compile(sys.stdin.read(), "candidate.py", "exec")'], { input: content, encoding: 'utf8', timeout: 5_000, windowsHide: true });
+  } else if (/\.(?:js|mjs|cjs)$/i.test(filePath)) {
+    result = spawnSync(process.execPath, ['--check', '--input-type=module'], { input: content, encoding: 'utf8', timeout: 5_000, windowsHide: true });
+  } else {
+    throw new Error(`Automatic PRs do not yet support syntax validation for ${filePath}`);
+  }
+  if (result.error || result.status !== 0) throw new Error(`Proposed edit fails syntax validation for ${filePath}`);
+}
+
+async function writableRepository(token, upstream, base, upstreamRepo) {
+  if (upstreamRepo.permissions?.push !== false) return { repository: upstream, headPrefix: '' };
+  const fork = await github(token, 'POST', `/repos/${upstream}/forks`, { default_branch_only: true });
+  if (!/^[\w.-]+\/[\w.-]+$/.test(fork.full_name ?? '')) throw new Error('GitHub did not return a valid fork');
+  for (let attempt = 0; attempt < 5; attempt++) {
+    try {
+      await github(token, 'GET', `/repos/${fork.full_name}/git/ref/heads/${encodeURIComponent(base)}`);
+      return { repository: fork.full_name, headPrefix: `${fork.owner.login}:` };
+    } catch (error) {
+      if (error.status !== 404 || attempt === 4) throw error;
+      await new Promise(resolve => setTimeout(resolve, 2_000));
+    }
+  }
+}
+
+export async function createFindingPullRequest({ token, repository, finding, mode = 'security' }) {
+  if (!token) throw new Error('GITHUB_TOKEN is required to create a pull request');
+  if (!/^[\w.-]+\/[\w.-]+$/.test(repository)) throw new Error('Invalid repository');
+  if (!finding?.filePath || !/^[\w./-]+$/.test(finding.filePath) || finding.filePath.startsWith('/') || finding.filePath.split('/').includes('..')) throw new Error('Invalid source path');
+  if (mode === 'security' && finding.severity !== 'critical') throw new Error('Only critical security findings can open repo-only PRs');
+  if (mode === 'security' && /(?:exposed|leaked|hardcoded)\s+(?:secret|credential|token|password|key)/i.test(finding.title)) throw new Error('Exposed credentials require rotation and cannot be safely fixed by an automatic PR');
+  const upstream = `/repos/${repository}`;
+  const repo = await github(token, 'GET', upstream);
+  const base = repo.default_branch;
+  const target = await writableRepository(token, repository, base, repo);
+  const targetRoot = `/repos/${target.repository}`;
+  const { file, encodedPath, source } = await sourceFile(token, target.repository, finding.filePath, base);
+  const content = applyExactEdit(source, finding);
+  validateSyntax(finding.filePath, content);
+  const baseRef = await github(token, 'GET', `${targetRoot}/git/ref/heads/${encodeURIComponent(base)}`);
+  const branch = `api-doctor/${mode}-${randomUUID().slice(0, 8)}`;
+  await github(token, 'POST', `${targetRoot}/git/refs`, { ref: `refs/heads/${branch}`, sha: baseRef.object.sha });
+  await github(token, 'PUT', `${targetRoot}/contents/${encodedPath}`, {
+    message: `fix: ${finding.title.slice(0, 65)}`,
+    content: Buffer.from(content, 'utf8').toString('base64'),
+    sha: file.sha,
+    branch
+  });
+  const pull = await github(token, 'POST', `${upstream}/pulls`, {
+    title: `[API Doctor] ${finding.title.slice(0, 100)}`,
+    head: `${target.headPrefix}${branch}`,
+    base,
+    body: `## ${mode === 'security' ? 'Critical security finding' : 'Observed API failure'}\n\n${finding.detail}\n\n**Impact:** ${finding.impact}\n\n**Source:** \`${finding.filePath}:${finding.line}\`\n\n**Validation:** ${finding.testPlan}\n\nProposed by API Doctor with Codex Luna. This is a draft; maintainers should review and run their tests before merging.`,
+    draft: true,
+    maintainer_can_modify: true
+  });
+  return { url: pull.html_url, number: pull.number, fork: target.repository !== repository };
 }
