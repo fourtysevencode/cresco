@@ -160,3 +160,28 @@ class RewardConfigItem(BaseModel):
 class CloseWeekOut(BaseModel):
     week: str
     rewards_issued: int
+
+
+# The fancy label shown on the student's statement for each kind of scholarship.
+SCHOLARSHIP_LABELS = {"books": "📚 Book Scholarship", "icecream": "🍦 Ice-Cream Scholarship"}
+
+
+class ScholarshipIn(BaseModel):
+    """Credit money to a student's wallet, labelled as a scholarship. It's ordinary wallet money."""
+
+    kind: Literal["books", "icecream"]
+    amount_paise: int = Field(gt=0, le=500_000)
+    # Optional line after the label, e.g. "Rank #1, week 39".
+    note: str | None = Field(default=None, max_length=80)
+    # Send the same key if the button is pressed twice for one scholarship; it's credited once.
+    idempotency_key: str | None = Field(default=None, max_length=64)
+
+
+class ScholarshipOut(BaseModel):
+    id: uuid.UUID
+    student_id: uuid.UUID
+    student_name: str
+    label: str
+    amount_paise: int
+    balance_after_paise: int
+    created_at: datetime

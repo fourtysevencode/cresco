@@ -28,20 +28,22 @@ class Row:
     points: int
 
 
-async def standings(session: AsyncSession, school_id: uuid.UUID, week: str, limit: int) -> list[Row]:
-    """Ranked by points; ties go to whoever reached their total first."""
+async def standings(session: AsyncSession, school_id: uuid.UUID, week: str | None, limit: int) -> list[Row]:
+    """Ranked by points for `week`, or all time if it's None; ties go to whoever reached their total first."""
     total = func.sum(PointsEntry.points).label("total")
     reached_at = func.max(PointsEntry.created_at).label("reached_at")
     stmt = (
         select(User.id, User.name, Student.grade, total)
         .join(PointsEntry, PointsEntry.student_id == User.id)
         .join(Student, Student.user_id == User.id)
-        .where(PointsEntry.school_id == school_id, PointsEntry.iso_week == week)
+        .where(PointsEntry.school_id == school_id)
         .group_by(User.id, User.name, Student.grade)
         .having(func.sum(PointsEntry.points) > 0)
         .order_by(total.desc(), reached_at.asc())
         .limit(limit)
     )
+    if week is not None:
+        stmt = stmt.where(PointsEntry.iso_week == week)
     rows = (await session.execute(stmt)).all()
     return [Row(i + 1, r.id, r.name, r.grade, int(r.total)) for i, r in enumerate(rows)]
 

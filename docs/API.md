@@ -46,6 +46,7 @@ The web dashboard is at **`/dashboard`**. Interactive API docs, where you can tr
 | `POST` | `/v1/admin/terminals/{id}/rotate-secret` | New secret; the old one stops working |
 | `GET`/`PUT` | `/v1/admin/reward-config` | Prize for each leaderboard rank |
 | `POST` | `/v1/admin/leaderboard/close-week?week=2026-W39` | Issue a week's prizes now (defaults to last week). Also runs automatically Sundays 23:59 IST |
+| `POST` | `/v1/admin/students/{id}/scholarships` | `{kind: books\|icecream, amount_paise, note?, idempotency_key?}`: credit the wallet as a scholarship. Plain wallet money, labelled "📚 Book Scholarship" or "🍦 Ice-Cream Scholarship" on the statement (ledger type `scholarship`) |
 
 ### Wallet (parents, students)
 | | | |
@@ -113,6 +114,7 @@ A declined tap carries one of these `reason`s:
 | | | |
 |---|---|---|
 | `GET` | `/v1/leaderboard/weekly?week=` | School standings (default: this week) + `me` |
+| `GET` | `/v1/leaderboard/all-time` | Same, by total points ever earned (`week` is `"all"`) |
 | `GET` | `/v1/leaderboard/weekly/winners?week=` | Prize winners (default: last week) |
 | `GET` | `/v1/students/me/points` | This week, all time, and this week's rank |
 | `GET` | `/v1/students/me/rewards` | Prizes and their status: `issued`, `redeemed` or `expired` |

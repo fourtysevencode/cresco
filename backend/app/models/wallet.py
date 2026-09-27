@@ -9,7 +9,7 @@ from app.core.db import Base, created_at_col, uuid_pk
 
 CARD_STATUSES = ("active", "blocked", "lost", "replaced")
 MERCHANT_KINDS = ("canteen", "bookstore")
-ENTRY_TYPES = ("topup", "purchase", "refund", "adjustment")
+ENTRY_TYPES = ("topup", "purchase", "refund", "adjustment", "scholarship")
 
 
 class NfcCard(Base):

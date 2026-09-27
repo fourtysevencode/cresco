@@ -20,8 +20,11 @@ from app.schemas.admin import (
     MerchantCreate,
     MerchantOut,
     ParentCreate,
+    SCHOLARSHIP_LABELS,
     RewardConfigItem,
     ScanLogOut,
+    ScholarshipIn,
+    ScholarshipOut,
     StaffCreate,
     StudentCreate,
     StudentOut,
@@ -30,7 +33,7 @@ from app.schemas.admin import (
     TerminalOut,
 )
 from app.schemas.auth import UserOut
-from app.services import accounts, leaderboard
+from app.services import accounts, leaderboard, ledger
 from app.services.ai_tutor import GeminiTutor, get_tutor
 
 router = APIRouter(prefix="/admin", tags=["admin"])
@@ -94,6 +97,33 @@ async def create_student(body: StudentCreate, admin: AdminUser, session: Session
 async def list_students(admin: AdminUser, session: SessionDep):
     """Every student with their card serial number, card status and balance."""
     return await _students(session, admin.school_id)
+
+
+@router.post("/students/{student_id}/scholarships", response_model=ScholarshipOut, status_code=201)
+async def give_scholarship(student_id: uuid.UUID, body: ScholarshipIn, admin: AdminUser, session: SessionDep):
+    """Credit money to a student's wallet as a scholarship (book discount or ice cream). It's plain
+    wallet money with a fancy label on the student's statement."""
+    student = await _school_student(session, admin, student_id)
+    label = SCHOLARSHIP_LABELS[body.kind]
+    key = f"scholarship:{admin.id}:{body.idempotency_key or uuid.uuid4()}"
+    entry = await ledger.credit_topup(
+        session,
+        student.id,
+        body.amount_paise,
+        key,
+        description=f"{label} · {body.note}" if body.note else label,
+        type_="scholarship",
+    )
+    await session.commit()
+    return ScholarshipOut(
+        id=entry.id,
+        student_id=student.id,
+        student_name=student.name,
+        label=entry.description,
+        amount_paise=entry.amount_paise,
+        balance_after_paise=entry.balance_after_paise,
+        created_at=entry.created_at,
+    )
 
 
 @router.post("/parents", response_model=UserOut, status_code=201)

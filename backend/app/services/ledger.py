@@ -139,9 +139,15 @@ async def _replayed_charge(
 
 
 async def credit_topup(
-    session: AsyncSession, student_id: uuid.UUID, amount_paise: int, idempotency_key: str, description: str = "Top-up"
+    session: AsyncSession,
+    student_id: uuid.UUID,
+    amount_paise: int,
+    idempotency_key: str,
+    description: str = "Top-up",
+    type_: str = "topup",
 ) -> LedgerEntry:
-    """Credit a top-up. Replaying the same idempotency key returns the original entry. Caller commits."""
+    """Credit a top-up (or, with `type_="scholarship"`, a scholarship). Replaying the same
+    idempotency key returns the original entry. Caller commits."""
     existing = (
         await session.execute(select(LedgerEntry).where(LedgerEntry.idempotency_key == idempotency_key))
     ).scalar_one_or_none()
@@ -151,7 +157,7 @@ async def credit_topup(
     if wallet is None:
         raise LedgerError("wallet_not_found")
     return await _append(
-        session, wallet, amount_paise, "topup", description=description, idempotency_key=idempotency_key
+        session, wallet, amount_paise, type_, description=description, idempotency_key=idempotency_key
     )
 
 

@@ -50,15 +50,24 @@ async def weekly(
     week: str | None = Query(default=None, examples=["2026-W39"], description="Defaults to the current week"),
     school_id: uuid.UUID | None = None,
 ):
-    school = await _school_for(session, user, school_id)
     target = _week(week, iso_week())
-    rows = await leaderboard.standings(session, school, target, limit=100_000 if user.role == "student" else get_settings().leaderboard_size)
+    return await _board(session, user, await _school_for(session, user, school_id), target)
+
+
+@router.get("/leaderboard/all-time", response_model=LeaderboardOut)
+async def all_time(user: CurrentUser, session: SessionDep, school_id: uuid.UUID | None = None):
+    """School standings by total points ever earned; `week` is "all"."""
+    return await _board(session, user, await _school_for(session, user, school_id), None)
+
+
+async def _board(session: AsyncSession, user: User, school: uuid.UUID, week: str | None) -> LeaderboardOut:
+    size = get_settings().leaderboard_size
+    rows = await leaderboard.standings(session, school, week, limit=100_000 if user.role == "student" else size)
     me = next((r for r in rows if r.student_id == user.id), None)
-    top = rows[: get_settings().leaderboard_size]
     return LeaderboardOut(
-        week=target,
+        week=week or "all",
         school_id=school,
-        rows=[LeaderboardRow(**r.__dict__) for r in top],
+        rows=[LeaderboardRow(**r.__dict__) for r in rows[:size]],
         me=LeaderboardRow(**me.__dict__) if me else None,
     )
 

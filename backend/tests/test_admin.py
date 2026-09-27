@@ -119,3 +119,35 @@ async def test_refresh_token(client, world):
 def test_terminal_secret_is_deterministic_per_version():
     tid = uuid.uuid4()
     assert terminal_secret(tid, 1) == terminal_secret(tid, 1) != terminal_secret(tid, 2)
+
+
+async def test_scholarship_credits_wallet_with_label(client, world):
+    st = world.students[0]
+    url = f"/v1/admin/students/{st['id']}/scholarships"
+    body = {"kind": "books", "amount_paise": 20_000, "note": "Rank #1", "idempotency_key": "k1"}
+    r = await client.post(url, json=body, headers=world.admin["headers"])
+    assert r.status_code == 201, r.text
+    assert r.json()["label"] == "📚 Book Scholarship · Rank #1"
+    assert r.json()["balance_after_paise"] == 30_000
+    assert (await client.post(url, json=body, headers=world.admin["headers"])).json()["id"] == r.json()["id"]  # double click
+    r = await client.post(url, json={"kind": "icecream", "amount_paise": 5_000}, headers=world.admin["headers"])
+    assert r.json()["label"] == "🍦 Ice-Cream Scholarship"
+
+    wallet = (await client.get(f"/v1/wallets/{st['id']}", headers=st["headers"])).json()
+    assert wallet["balance_paise"] == 35_000
+    txns = (await client.get(f"/v1/wallets/{st['id']}/transactions", headers=st["headers"])).json()
+    assert [(t["type"], t["amount_paise"]) for t in txns[:2]] == [("scholarship", 5_000), ("scholarship", 20_000)]
+    # Spendable like any other money.
+    assert (await world.pay(client, st, 34_000))["result"] == "approved"
+
+    # Only admins, only for their own school's students, only positive amounts.
+    assert (await client.post(url, json=body, headers=st["headers"])).status_code == 403
+    assert (await client.post(url, json={"kind": "books", "amount_paise": 0}, headers=world.admin["headers"])).status_code == 422
+    async with get_sessionmaker()() as s:
+        other = School(name="Other")
+        s.add(other)
+        await s.flush()
+        outsider = await accounts.create_student(s, other.id, name="X", email=None, phone=None, password=None, grade=7, preferred_language="ta")
+        await s.commit()
+    r = await client.post(f"/v1/admin/students/{outsider.id}/scholarships", json=body, headers=world.admin["headers"])
+    assert r.status_code == 404

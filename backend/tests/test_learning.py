@@ -129,6 +129,26 @@ async def test_leaderboard_week_close_and_redeem(client, world):
     assert [x["status"] for x in rewards] == ["redeemed"]
 
 
+async def test_all_time_leaderboard(client, world):
+    s0, s1, _ = world.students
+    for st in (s0, s1):
+        quiz = await make_quiz(client, st)
+        await client.post(f"/v1/quizzes/{quiz['id']}/attempts", json={"answers": all_correct(quiz)}, headers=st["headers"])
+    # s0's points were earned last week: gone from this week's board, still on the all-time one.
+    async with get_sessionmaker()() as s:
+        await s.execute(update(PointsEntry).where(PointsEntry.student_id == s0["id"]).values(iso_week=previous_iso_week(iso_week())))
+        await s.commit()
+    quiz = await make_quiz(client, s0)
+    await client.post(f"/v1/quizzes/{quiz['id']}/attempts", json={"answers": [0] * 6}, headers=s0["headers"])
+
+    weekly = (await client.get("/v1/leaderboard/weekly", headers=world.admin["headers"])).json()
+    assert [(r["student_id"], r["points"]) for r in weekly["rows"]] == [(str(s1["id"]), 80), (str(s0["id"]), 20)]
+    board = (await client.get("/v1/leaderboard/all-time", headers=s0["headers"])).json()
+    assert board["week"] == "all"
+    assert [(r["student_id"], r["points"]) for r in board["rows"]] == [(str(s0["id"]), 100), (str(s1["id"]), 80)]
+    assert board["me"]["rank"] == 1
+
+
 async def test_custom_reward_config(client, world):
     config = [{"rank": 1, "type": "free_icecream", "title": "Ice cream", "value_paise": None, "merchant_kind": "canteen"}]
     r = await client.put("/v1/admin/reward-config", json=config, headers=world.admin["headers"])
