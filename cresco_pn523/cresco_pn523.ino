@@ -168,7 +168,9 @@ void heartbeat() {
   int code = signedPost("heartbeat", "{}", res);
   if (code == 200) Serial.printf("Online: %s\n", (const char *)(res["merchant"] | ""));
   else if (code == 401) Serial.println("Rejected (401): check TERMINAL_ID / TERMINAL_SECRET and the clock");
-  else Serial.println("Server unreachable");
+  else if (code >= 300 && code < 400) Serial.println("Redirected: set API_BASE to the https:// address with no trailing slash");
+  else if (code > 0) Serial.printf("Server error (HTTP %d)\n", code);
+  else Serial.println("Server unreachable: check the WiFi has internet access");
   lastHeartbeatAt = millis();
 }
 
