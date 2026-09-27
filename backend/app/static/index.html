@@ -1,0 +1,133 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Cresco</title>
+<meta name="description" content="Cresco is a student app for schools: an NFC wallet for the canteen and bookstore, and an AI tutor that explains textbook pages in Indian languages.">
+<style>
+  /* Same tokens and components as dashboard.html */
+  :root {
+    --bg: #f6f7f9; --surface: #ffffff; --surface-2: #f0f2f5; --text: #15181d; --muted: #5d6673;
+    --border: #dfe3e8; --accent: #1f6feb; --accent-text: #ffffff;
+    --radius: 10px; --shadow: 0 1px 2px rgba(0,0,0,.06), 0 1px 8px rgba(0,0,0,.04);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0f1216; --surface: #171b21; --surface-2: #1f242c; --text: #e7eaee; --muted: #9aa4b2;
+      --border: #2b323c; --accent: #4c8dff; --accent-text: #0b0d10;
+      --shadow: none;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text); font-size: 15px; line-height: 1.45;
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans", "Noto Sans Tamil", "Noto Sans Kannada",
+      "Noto Sans Telugu", "Noto Sans Bengali", "Noto Sans Devanagari", sans-serif;
+  }
+  header { display: flex; align-items: center; gap: 16px; padding: 12px 20px; background: var(--surface); border-bottom: 1px solid var(--border); position: sticky; top: 0; z-index: 5; }
+  header h1 { font-size: 18px; margin: 0; letter-spacing: .2px; }
+  header .btn { margin-left: auto; }
+  main { max-width: 1100px; margin: 0 auto; padding: 16px 20px 60px; }
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 18px; box-shadow: var(--shadow); margin-bottom: 16px; }
+  .card h2 { font-size: 16px; margin: 0 0 12px; }
+  .grid { display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); margin-bottom: 16px; }
+  .grid > .card { margin-bottom: 0; }
+  .btn { display: inline-block; padding: 9px 14px; border-radius: 8px; border: 1px solid var(--border); background: var(--surface-2); color: var(--text); font: inherit; text-decoration: none; }
+  .btn.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-text); font-weight: 600; }
+  .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .muted { color: var(--muted); }
+  .small { font-size: 13px; }
+  p { margin: 0 0 12px; }
+  ul { margin: 0; padding-left: 18px; }
+  li { margin: 4px 0; }
+  table { width: 100%; border-collapse: collapse; }
+  th, td { text-align: left; padding: 8px 6px; border-bottom: 1px solid var(--border); }
+  th { font-size: 12px; text-transform: uppercase; letter-spacing: .4px; color: var(--muted); font-weight: 600; }
+  .pill { display: inline-block; padding: 2px 10px; border-radius: 999px; font-size: 13px; background: var(--surface-2); margin: 0 4px 6px 0; }
+  .hero { padding: 28px 24px; }
+  .hero h2 { font-size: 28px; line-height: 1.2; margin: 0 0 10px; }
+  .hero p { font-size: 16px; color: var(--muted); max-width: 640px; margin-bottom: 18px; }
+  footer { text-align: center; padding: 20px; font-size: 13px; }
+  footer a { color: var(--muted); margin: 0 8px; }
+  @media (max-width: 600px) { main { padding: 12px; } header { padding: 10px 12px; } .hero { padding: 20px 18px; } .hero h2 { font-size: 23px; } }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Cresco</h1>
+  <a class="btn" href="/dashboard">Sign in</a>
+</header>
+
+<main>
+  <div class="card hero">
+    <h2>One card to pay, learn and win at school.</h2>
+    <p>Students tap an NFC card to pay at the canteen and bookstore, and an AI tutor explains any textbook page in their own language, out loud.</p>
+    <div class="row">
+      <a class="btn primary" href="/dashboard">Open the dashboard</a>
+      <a class="btn" href="/docs">API docs</a>
+    </div>
+  </div>
+
+  <div class="grid">
+    <div class="card">
+      <h2>Wallet</h2>
+      <p class="muted">Tap the card at the counter. The cashier types the amount and the balance updates instantly.</p>
+      <ul>
+        <li>The reader sends only the card's serial number</li>
+        <li>Parents add money and see every purchase</li>
+        <li>Double-tap-safe payments with a full ledger</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h2>AI tutor</h2>
+      <p class="muted">Photograph a textbook page. The tutor explains it, reads it aloud and answers questions.</p>
+      <ul>
+        <li>Text is read in the browser; only words go to the AI</li>
+        <li>Quizzes award points for correct answers</li>
+        <li>Points feed the weekly school leaderboard</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="grid">
+    <div class="card">
+      <h2>Weekly prizes</h2>
+      <table>
+        <tr><th>Rank</th><th>Prize</th><th>Claim at</th></tr>
+        <tr><td>1st</td><td>Free Olympiad registration</td><td>Bookstore</td></tr>
+        <tr><td>2nd</td><td>₹200 off</td><td>Bookstore</td></tr>
+        <tr><td>3rd</td><td>Free ice cream</td><td>Canteen</td></tr>
+      </table>
+      <p class="muted small" style="margin: 12px 0 0">Admins can also gift Book and Ice-Cream Scholarships to the top 3.</p>
+    </div>
+    <div class="card">
+      <h2>Languages</h2>
+      <p class="muted">Lessons are explained and read aloud in:</p>
+      <div>
+        <span class="pill">தமிழ் Tamil</span><span class="pill">ಕನ್ನಡ Kannada</span><span class="pill">తెలుగు Telugu</span>
+        <span class="pill">বাংলা Bengali</span><span class="pill">मराठी Marathi</span><span class="pill">हिन्दी Hindi</span><span class="pill">English</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Who it's for</h2>
+    <table>
+      <tr><td><b>Students</b></td><td class="muted">Learn, take quizzes, climb the leaderboard, check your balance.</td></tr>
+      <tr><td><b>Parents</b></td><td class="muted">Top up the wallet and see purchases.</td></tr>
+      <tr><td><b>Cashiers</b></td><td class="muted">Enter an amount and wait for the tap. Prizes redeem the same way.</td></tr>
+      <tr><td><b>Admins</b></td><td class="muted">Manage students, cards and readers.</td></tr>
+    </table>
+  </div>
+</main>
+
+<footer>
+  <a href="/dashboard">Dashboard</a>
+  <a href="/docs">API docs</a>
+  <a href="/health">Status</a>
+</footer>
+
+</body>
+</html>
