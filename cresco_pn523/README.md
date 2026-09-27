@@ -19,9 +19,28 @@ The reader does one thing: read an NFC card's **serial number (UID)** and send i
 
 Set the PN532's mode switches to **I2C**. LEDs and a buzzer are optional; set their pins in `config.h`.
 
+## Display (1.8" 128x160 RGB TFT, ST7735, SPI)
+
+| Display pin | ESP32 |
+|---|---|
+| VCC | 3V3 |
+| GND | GND |
+| SCK / SCL / CLK | GPIO 6 |
+| SDA / MOSI / DIN | GPIO 7 |
+| CS | GPIO 10 |
+| DC / A0 / RS | GPIO 3 |
+| RST / RES | GPIO 1 |
+| LED / BL / BLK (backlight) | 3V3 |
+
+The display shows **Waiting** while idle, **Sending** while a tap is being sent, then a green tick with the student's name (paid or identified) or a red cross with the reason (declined, unregistered card, no connection). After 2.5 s it goes back to **Waiting**.
+
+- The pins are defaults in `cresco_pn523.ino`; to use other pins, `#define TFT_SCK`, `TFT_MOSI`, `TFT_CS`, `TFT_DC` or `TFT_RST` in `config.h`. If RST is wired to 3V3, set `TFT_RST` to `-1`.
+- If the colours are swapped or there's a stripe of noise along one edge, add `#define TFT_TAB INITR_GREENTAB` (or `INITR_REDTAB`) to `config.h`.
+- Leave the display's MISO/SDO pin (if it has one) and the SD-card pins unconnected.
+
 ## Setup
 
-1. Arduino Library Manager: install **Adafruit PN532** and **ArduinoJson** (v7).
+1. Arduino Library Manager: install **Adafruit PN532**, **ArduinoJson** (v7), **Adafruit ST7735 and ST7789 Library** and **Adafruit GFX Library**.
 2. Register the reader: dashboard → *Admin → Readers → Add reader* (or `POST /v1/admin/terminals`). Copy the `terminal_id` and `secret`; the secret is shown only once.
 3. Copy `config.h.example` to `config.h` and fill in WiFi, `API_BASE`, `TERMINAL_ID` and `TERMINAL_SECRET`. `config.h` is git-ignored.
 4. Upload, then open the Serial Monitor at 115200 baud. You should see `Online: School Canteen`.
