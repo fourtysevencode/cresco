@@ -4,7 +4,7 @@ API Doctor is a CLI for opt-in hackathon repositories. Give it a GitHub reposito
 
 ## Setup
 
-Requires Node.js 20+, the Codex CLI signed in with **ChatGPT**, and GitHub authorization for PR creation. API Doctor first uses `GITHUB_TOKEN` or `GH_TOKEN`, then tries the existing Git credential helper. No npm packages or OpenAI API key are required.
+Requires Node.js 20+ and the Codex CLI signed in with **ChatGPT**. GitHub authorization is needed to create PRs; public repository scans can run without it. API Doctor first uses `GITHUB_TOKEN` or `GH_TOKEN`, then tries the existing Git credential helper. No npm packages or OpenAI API key are required. On Windows, Odyssey also finds the Codex app's versioned `codex.exe` if PowerShell cannot find `codex` on `PATH`.
 
 ```bash
 codex login
@@ -14,11 +14,16 @@ If the Git credential helper is not signed in, set `GITHUB_TOKEN` in your shell'
 
 ## Run
 
-Launch the interactive **Odyssey** terminal with `npm run odyssey`. It shows an Odysseus portrait, asks for the GitHub repository, and lets you press Enter to skip the optional live API URL. An animated progress bar stays visible during the scan; the final report shows severity counts, blocking logical errors, and draft PR links. On the configured Windows machine, the **Odyssey API Doctor** desktop shortcut opens this launcher in PowerShell.
+From this `track7` folder, run `npm run odyssey`, or double-click the **Odyssey API Doctor** desktop shortcut on the configured Windows machine. The launcher opens PowerShell with character art sampled from the supplied Odysseus statue image. Paste a plain GitHub repository URL, then paste a GET API URL or press **Enter** to scan the repository without one. A healthy live endpoint ends the check without a Luna review; use a route such as `/health`, not a website homepage that redirects.
+
+While Odyssey runs, the terminal shows a progress bar and timestamped logs for source loading, Luna review (including elapsed-time updates), live probes, and PR validation. The final report shows critical, high, medium, and logical-error counts plus draft PR links. Logs include file paths and status, but do not print credentials or source contents.
 
 ```bash
 # Repository only: investigate critical/high/medium and blocking logical issues, then open draft fix PRs
-npm run doctor -- inspect https://github.com/owner/repository
+npm run doctor -- inspect https://github.com/owner/repository --verbose
+
+# Review without opening PRs
+npm run doctor -- inspect https://github.com/owner/repository --dry-run --verbose
 
 # Repository and live API: probe the endpoint, diagnose a failure, and open a draft fix PR
 npm run doctor -- inspect https://github.com/owner/repository --live https://demo.example.com/health
@@ -27,7 +32,7 @@ npm run doctor -- inspect https://github.com/owner/repository --live https://dem
 npm run doctor -- inspect https://github.com/owner/repository --live https://demo.example.com/health --watch
 ```
 
-Use `--dry-run` to review findings without opening PRs, `--json` for machine-readable results, or `--interval 30` with `--watch`. `--no-ai` runs the basic source and HTTP checks only. For a local development API, add `--allow-local`. `npm run doctor -- demo` runs a bundled, network-free smoke check.
+Use `--verbose` for timestamped diagnostic progress on stderr, `--json` for machine-readable results on stdout, or `--interval 30` with `--watch`. `--no-ai` runs the basic source and HTTP checks only. For a local development API, add `--allow-local`. `npm run doctor -- demo` runs a bundled, network-free smoke check. The CLI commands must run from this folder, where `package.json` lives; pass `inspect` after npm's `--` separator and paste URLs as plain text rather than Markdown links.
 
 With a live URL, API Doctor sends a GET request. A server error triggers Luna analysis using the observed response and repository source. If the URL cannot be reached, it falls back to repository analysis. A healthy endpoint does not trigger a PR. With only a repository URL, Luna looks for concrete, fixable **critical, high, or medium** issues and lower-severity **logical errors that prevent startup or a core API/demo workflow from running**. It creates a draft PR for each eligible finding that passes the source and syntax checks; ordinary low-severity findings are excluded. The bounded scan prioritizes application source and currently inspects up to 24 files, so a clean result is not a full audit or proof that every possible issue was found. The CLI does not execute the target's code.
 
@@ -35,9 +40,11 @@ Before opening a PR, API Doctor checks that the proposed original text occurs ex
 
 ## Validation and limits
 
-`npm test` covers repository and live modes, the bundled HTTP failure, Codex account gating, and GitHub's fork/branch/file/draft-PR request flow. A real read-only Luna run against a public GitHub repository also completed successfully. The GitHub PR flow is tested with a controlled API mock; creating a real PR requires a target repository and GitHub credentials.
+`npm test` covers repository and live modes, the bundled HTTP failure, Codex account gating, the interactive launcher, severity filtering, and GitHub's fork/branch/file/draft-PR request flow. Real read-only Luna scans of public repositories have also completed. Automated PR tests use a controlled GitHub API mock; real PRs require GitHub authorization and a repository that accepts them.
 
 The end-to-end GitHub flow was also exercised on a fork of an [intentionally vulnerable training API](https://github.com/Dishan-Chalana/vulnerable-node-api). It opened three real draft PRs on the [practice fork](https://github.com/Stawberrymind/vulnerable-node-api): [login SQL injection](https://github.com/Stawberrymind/vulnerable-node-api/pull/1), [calculator code execution](https://github.com/Stawberrymind/vulnerable-node-api/pull/2), and [ping command injection](https://github.com/Stawberrymind/vulnerable-node-api/pull/3). These demonstrate the workflow and are not changes to the training upstream. That repository has no test script; the edited files passed syntax checks and their diffs were reviewed.
+
+To try Odyssey yourself, paste the practice fork URL into the launcher and press Enter at the live URL prompt. Matching fixes may appear as existing PRs because those three drafts are already open.
 
 Only probe APIs and repositories that teams have agreed to share. Use mock student, health, and financial data for the hackathon. Document any AI tools used in your submitted project README.
 

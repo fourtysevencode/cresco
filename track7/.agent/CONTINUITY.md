@@ -9,6 +9,11 @@
 
 ## [PROGRESS]
 
+- 2026-09-27T10:18:45Z [USER] Asked to update the README.
+- 2026-09-27T10:18:45Z [CODE] README now gives interactive shortcut/CLI steps, verbose and dry-run examples, healthy live URL behavior, authentication and Windows Codex resolution, scan limits, practice fork usage, and current validation scope. Markdown diff check passes; no code changed in this turn.
+- 2026-09-27T10:07:16Z [USER] Requested verbose CLI logging and replacement of the generic helmet banner with ASCII art derived from the attached marble bust image.
+- 2026-09-27T10:07:16Z [CODE] Added a 64x28 RGB thumbnail asset sampled from the attachment and runtime ASCII/ANSI rendering. Added `--verbose` with timestamped GitHub source, Luna heartbeat, live probe, and draft PR validation logs; the desktop launcher enables it automatically and wraps log lines around its progress bar.
+- 2026-09-27T10:07:16Z [TOOL] Nineteen tests and syntax/diff checks pass. Interactive live smoke test showed the image-derived banner, file-by-file logs, progress bar, and HTTP 200 summary; no PR was created. Existing desktop shortcut remains valid.
 - 2026-09-27T09:42:14Z [USER] Desktop launcher failed with `spawn codex.exe ENOENT` after repository input and blank live URL.
 - 2026-09-27T09:42:14Z [CODE] Codex runner now resolves the installed versioned Windows `codex.exe` to an absolute path, with PATH and explicit override support. Added a regression test for an empty PATH.
 - 2026-09-27T09:42:14Z [TOOL] All 18 tests pass. Installed executable logged into ChatGPT with PATH removed. A read-only Cresco scan completed with one medium logic finding; a subsequent real Odyssey launcher run completed with no eligible findings or PRs. Model finding variance was observed. Shortcut remains valid and points at updated code.
