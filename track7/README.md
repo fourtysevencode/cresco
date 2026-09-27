@@ -1,47 +1,42 @@
 # API Doctor · Odyssey
 
-A CLI-first hackathon prototype for investigating Node and Python/FastAPI demo repositories. It accepts a GitHub repo URL alone, or the repo URL plus a live API URL. You do not need to paste an error log.
+API Doctor is a CLI for opt-in hackathon repositories. Give it a GitHub repository URL. Add a live API URL when one is available. It uses GPT-6 Luna through the locally signed-in Codex CLI to investigate and proposes reviewable **draft pull requests** for supported Node and Python/FastAPI source files.
 
-## Run
+## Setup
 
-Requires Node.js 20 or newer. No npm packages are needed.
-
-```bash
-npm run doctor -- demo
-npm run doctor -- inspect https://github.com/owner/repository
-npm run doctor -- inspect https://github.com/owner/repository --live https://demo.example.com/health
-npm run doctor -- inspect https://github.com/owner/repository --live https://demo.example.com/health --watch
-```
-
-Run `demo` first: it starts the bundled broken API briefly, detects its real HTTP 500, and prints the diagnosis and patch preview. It needs no network access, GitHub token, or Codex login.
-
-Repo-only mode reads the GitHub file tree and up to 24 small application source files. It identifies Node and Python routes and flags a few concrete missing-data patterns. These are **possible faults**, not proof that the deployed API has crashed. The scan reads source; it does not install dependencies or execute the other team's code. Public repos work without GitHub credentials, subject to GitHub's unauthenticated rate limit. Set `GITHUB_TOKEN` in your shell for private repo access or a higher rate limit. Never put the token in the command line or a committed file.
-
-Add `--live` to send a safe GET request to a public HTTPS health or demo endpoint. An HTTP 500 or connection failure becomes a confirmed incident. If the response contains a Node stack or Python traceback, API Doctor diagnoses it and tries to match the source file. If the server hides the trace, the CLI reports the confirmed failure and says that its root cause is unknown. `--watch` repeats the check every 15 seconds until Ctrl+C; use `--interval 30` to change that cadence. For a local demo URL only, add `--allow-local`. `--json` emits machine-readable report and probe records.
-
-## Optional Luna review using your ChatGPT plan
+Requires Node.js 20+, the Codex CLI signed in with **ChatGPT**, and a GitHub token with access to the target repository and permission to create pull requests. No npm packages or OpenAI API key are required.
 
 ```bash
 codex login
-npm run doctor -- inspect https://github.com/owner/repository --codex
 ```
 
-Choose **Sign in with ChatGPT** during `codex login`. `--codex` sends the bounded source snapshot to a read-only, ephemeral GPT-6 Luna Fast analysis with xhigh reasoning. It uses the CLI's ChatGPT sign-in and Codex allowance; it refuses to run if the CLI is not signed in with ChatGPT, so this option does not silently use an API key. The CLI on this development machine was not signed in when this version was built, so this optional path has not been end-to-end verified here. Fast mode consumes allowance more quickly. The model's findings are suggestions, never treated as a confirmed live crash or an automatic code change.
+Set `GITHUB_TOKEN` in your shell's environment or secret manager. Do not paste it into a command, chat, or committed file. For repositories you cannot push to, the token must allow creating a fork; API Doctor then opens the PR against the original repository from a branch in that fork. The target team's repository must allow outside PRs. The tool never merges a PR.
 
-## Draft pull requests
+## Run
 
 ```bash
-npm run doctor -- inspect https://github.com/owner/repository --live https://demo.example.com/health --pr
+# Repository only: investigate critical security issues and open draft fix PRs
+npm run doctor -- inspect https://github.com/owner/repository
+
+# Repository and live API: probe the endpoint, diagnose a failure, and open a draft fix PR
+npm run doctor -- inspect https://github.com/owner/repository --live https://demo.example.com/health
+
+# Keep monitoring the live URL every 15 seconds; Ctrl+C stops it
+npm run doctor -- inspect https://github.com/owner/repository --live https://demo.example.com/health --watch
 ```
 
-`--pr` requires `GITHUB_TOKEN` with write access to that repository. It opens a **draft** PR only when a live failure includes a source location and matches one of the two bundled, narrowly validated missing-progress repair recipes. Other failures are diagnosed without a guessed edit or PR. API Doctor never merges a PR. The target team must review and test any proposed change. This version does not create fork-based PRs for repositories where your token lacks write permission.
+Use `--dry-run` to review findings without opening PRs, `--json` for machine-readable results, or `--interval 30` with `--watch`. `--no-ai` runs the basic source and HTTP checks only. For a local development API, add `--allow-local`. `npm run doctor -- demo` runs a bundled, network-free smoke check.
 
-## Demo and checks
+With a live URL, API Doctor sends a GET request. A server error or connection failure triggers Luna analysis using the observed response and repository source. A healthy endpoint does not trigger a PR. With only a repository URL, Luna looks for demonstrable **critical** security vulnerabilities; it should return no findings when evidence is insufficient. The bounded scan prioritizes application source and currently inspects up to 24 files, so a clean result is not a full security audit. The CLI does not execute the target's code.
 
-The repository includes a deliberately crashing Node API and a Python failure example used by automated tests. Run `npm test` to check the source diagnosis, CLI flows, live 500 detection, patch previews, and mocked GitHub draft PR creation. `npm start -- --help` prints all CLI options.
+Before opening a PR, API Doctor checks that the proposed original text occurs exactly once in the current GitHub file, matches the cited line, and that the edited JavaScript or Python file parses. It opens one draft PR per finding. The maintainer must run relevant tests and review the change. An exposed credential requires rotation, so API Doctor does not open an automatic PR for that finding.
 
-Use mock data only during the event. Ask teams before probing their demo API or scanning private code. Do not send student, health, or financial data to the bot.
+## Validation and limits
+
+`npm test` covers repository and live modes, the bundled HTTP failure, Codex account gating, and GitHub's fork/branch/file/draft-PR request flow. The GitHub PR flow is tested with a controlled API mock; creating a real PR requires a target repository and GitHub credentials. The Codex CLI on this machine still needs its ChatGPT sign-in completed before a live Luna run can be verified.
+
+Only probe APIs and repositories that teams have agreed to share. Use mock student, health, and financial data for the hackathon. Document any AI tools used in your submitted project README.
 
 ## AI tool disclosure
 
-OpenAI Codex was used to design and implement this prototype, its CLI, tests, and documentation. The default scan uses explicit rules and does not call a model. The optional `--codex` mode uses GPT-6 Luna through the locally authenticated Codex CLI.
+OpenAI Codex was used to implement API Doctor. API Doctor uses GPT-6 Luna through the Codex CLI for repository and incident analysis. The bundled demo and `--no-ai` mode do not call a model.
