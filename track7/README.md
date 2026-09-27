@@ -1,59 +1,47 @@
 # API Doctor · Odyssey
 
-An opt-in observability bot for HackBlitz Mission 7. It checks demo API endpoints, accepts stack traces through a log-ingest endpoint, identifies a likely cause, and prepares a narrow source patch. When GitHub access is configured, it opens a **draft** fix pull request for a supported failure.
+A CLI-first hackathon prototype for investigating Node and Python/FastAPI demo repositories. It accepts a GitHub repo URL alone, or the repo URL plus a live API URL. You do not need to paste an error log.
 
-## Run the demo
+## Run
 
-Requires Node.js 20 or newer. No package installation is needed.
-
-```bash
-npm start
-```
-
-Open <http://127.0.0.1:4100>. Click **Run live API check**. The bundled Campus Progress API returns a real 500 error; API Doctor captures its Node stack trace, locates the failing line, and displays the proposed fix. Click **Inject Python traceback** to see the same flow for a Python-style failure log.
+Requires Node.js 20 or newer. No npm packages are needed.
 
 ```bash
-npm test
+npm run doctor -- demo
+npm run doctor -- inspect https://github.com/owner/repository
+npm run doctor -- inspect https://github.com/owner/repository --live https://demo.example.com/health
+npm run doctor -- inspect https://github.com/owner/repository --live https://demo.example.com/health --watch
 ```
 
-## Connect other teams' APIs
+Run `demo` first: it starts the bundled broken API briefly, detects its real HTTP 500, and prints the diagnosis and patch preview. It needs no network access, GitHub token, or Codex login.
 
-Copy `targets.example.json` to `targets.json` and add only teams that agree to participate. Each entry needs a unique ID, display name, health or demo URL, GitHub `owner/repo`, and the repository path of the failing source file. The bot polls URLs every 15 seconds. To supply stack traces that are not included in the HTTP response, forward a log to:
+Repo-only mode reads the GitHub file tree and up to 24 small application source files. It identifies Node and Python routes and flags a few concrete missing-data patterns. These are **possible faults**, not proof that the deployed API has crashed. The scan reads source; it does not install dependencies or execute the other team's code. Public repos work without GitHub credentials, subject to GitHub's unauthenticated rate limit. Set `GITHUB_TOKEN` in your shell for private repo access or a higher rate limit. Never put the token in the command line or a committed file.
 
-```http
-POST /api/ingest
-Content-Type: application/json
-X-Ingest-Secret: <optional shared secret>
+Add `--live` to send a safe GET request to a public HTTPS health or demo endpoint. An HTTP 500 or connection failure becomes a confirmed incident. If the response contains a Node stack or Python traceback, API Doctor diagnoses it and tries to match the source file. If the server hides the trace, the CLI reports the confirmed failure and says that its root cause is unknown. `--watch` repeats the check every 15 seconds until Ctrl+C; use `--interval 30` to change that cadence. For a local demo URL only, add `--allow-local`. `--json` emits machine-readable report and probe records.
 
-{"targetId":"team-example","log":"<stack trace>"}
+## Optional Luna review using your ChatGPT plan
+
+```bash
+codex login
+npm run doctor -- inspect https://github.com/owner/repository --codex
 ```
 
-Set `INGEST_SECRET` in the bot's environment to require that header. The local server binds to `127.0.0.1`; a hosted deployment would need an HTTPS endpoint or a private tunnel for remote log forwarding. Do not forward real student or financial data. The demo uses mock data only.
+Choose **Sign in with ChatGPT** during `codex login`. `--codex` sends the bounded source snapshot to a read-only, ephemeral GPT-6 Luna Fast analysis with xhigh reasoning. It uses the CLI's ChatGPT sign-in and Codex allowance; it refuses to run if the CLI is not signed in with ChatGPT, so this option does not silently use an API key. The CLI on this development machine was not signed in when this version was built, so this optional path has not been end-to-end verified here. Fast mode consumes allowance more quickly. The model's findings are suggestions, never treated as a confirmed live crash or an automatic code change.
 
-## Enable draft fix PRs
+## Draft pull requests
 
-Set these environment variables and restart the bot:
-
-```text
-AUTO_PR=true
-GITHUB_TOKEN=<fine-grained token with Contents: write and Pull requests: write on the opted-in repository>
-GITHUB_REPOSITORY=owner/repo
-GITHUB_FILE_PATH=track7/demo/target-api.js
-PYTHON_FILE_PATH=track7/demo/python-api.py
+```bash
+npm run doctor -- inspect https://github.com/owner/repository --live https://demo.example.com/health --pr
 ```
 
-`GITHUB_REPOSITORY` and the file-path variables connect the bundled examples. For other teams, put `repository` and `filePath` in `targets.json`. The bot reads the repository's default branch, creates an `api-doctor/fix-*` branch, commits the patch, and opens a draft PR. The target team must grant the token repository access. Never put the token in `targets.json` or commit it.
+`--pr` requires `GITHUB_TOKEN` with write access to that repository. It opens a **draft** PR only when a live failure includes a source location and matches one of the two bundled, narrowly validated missing-progress repair recipes. Other failures are diagnosed without a guessed edit or PR. API Doctor never merges a PR. The target team must review and test any proposed change. This version does not create fork-based PRs for repositories where your token lacks write permission.
 
-The current automatic repair rules cover the two bundled missing-progress cases. Other Node and Python traces can receive a diagnosis, but the bot does not guess a source edit when it cannot verify a safe patch. A production version would add more validated repair recipes, tests in a disposable checkout, deployment, and stronger access control.
+## Demo and checks
 
-## Pitch demo path
+The repository includes a deliberately crashing Node API and a Python failure example used by automated tests. Run `npm test` to check the source diagnosis, CLI flows, live 500 detection, patch previews, and mocked GitHub draft PR creation. `npm start -- --help` prints all CLI options.
 
-1. Show the watched Campus Progress API and run the live check.
-2. Open the 500 incident: the stack location, root cause, and before/after patch are visible.
-3. Show a draft PR when connected to a demo repository, or show the exact patch preview.
-4. Inject the Python traceback to show the bot handles both ecosystems.
-5. Explain that other teams opt in with a URL, log forwarder, and repository permission.
+Use mock data only during the event. Ask teams before probing their demo API or scanning private code. Do not send student, health, or financial data to the bot.
 
 ## AI tool disclosure
 
-OpenAI Codex was used to design and implement this prototype, its demo UI, tests, and documentation. No AI model is called by the running bot; its current diagnoses and patches use explicit rules.
+OpenAI Codex was used to design and implement this prototype, its CLI, tests, and documentation. The default scan uses explicit rules and does not call a model. The optional `--codex` mode uses GPT-6 Luna through the locally authenticated Codex CLI.
