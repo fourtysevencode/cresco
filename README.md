@@ -1,5 +1,7 @@
 # Cresco
 
+The code in this repository was written with the use of AI
+
 Cresco is a student app with two halves that share one student identity:
 
 - **Wallet.** Students tap an NFC card at the school canteen or bookstore to pay. The reader reads only the card's serial number; the server maps it to the student and holds the balance. The cashier types the amount on the dashboard, and parents add money there.
