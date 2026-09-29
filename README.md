@@ -1,6 +1,6 @@
 # Cresco
 
-The code in this repository was written with the use of AI
+The code in this repository was written with the use of generative AI
 
 Cresco is a student app with two halves that share one student identity:
 
